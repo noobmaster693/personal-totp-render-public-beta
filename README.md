@@ -1,82 +1,228 @@
-# Personal TOTP — public Render beta
+# Temporary G2G TOTP Access Portal
 
-A minimal public TOTP display for a disposable test account. The page opens directly with no login. Render stores the permanent TOTP credential in the `TOTP_SECRET` environment variable and generates the current code server-side.
+This repository combines the existing Render-hosted authenticator page with:
 
-> **Important:** anyone who knows or discovers the Render URL can view the active code. This intentionally provides no access control and must never be used for an important or personal account.
+- one shared email-based software account;
+- buyer-specific temporary access keys;
+- automatic expiration;
+- a persistent order database;
+- G2G `order.api_delivery` webhook processing;
+- automatic credential/key delivery through the G2G API;
+- cancellation and refund revocation;
+- rate limiting and signed browser sessions.
 
-## Deliberate restrictions
+The permanent TOTP setup secret stays in Render. Buyers receive only the current short-lived code after entering the key linked to their purchase.
 
-The website has no registration, login, QR scanner, secret importer, database, setup form, or secret-editing route. The only way to change the credential is through Render’s Environment page.
+Use this only for software and an email-based account that you own or are authorized to distribute, and only where the software provider and G2G permit the shared-access model.
 
-Routes:
+## What changed from the public beta
 
-- `/` — public code display
-- `/api/code` — public JSON code endpoint
-- `/health` — service health status
+Previously, `/api/code` returned the TOTP code to anyone. It now returns `401` until a valid buyer access key has been entered.
 
-## GitHub contents
+```text
+G2G purchase
+  -> G2G webhook
+  -> generate access key
+  -> save order and expiration
+  -> deliver email/password/portal/key through G2G
+  -> buyer unlocks portal
+  -> portal returns current TOTP until expiration
+```
 
-The public repository contains only source code. `.env` is ignored by `.gitignore`. Never commit a real TOTP secret, QR image, `otpauth://` URI, or `.env` file.
+## Render environment variables
 
-## Deploy with Render Blueprint
+Keep all real secrets in Render, never in GitHub.
 
-1. Create an empty GitHub repository and upload these files to its root.
-2. In Render, choose **New → Blueprint** and connect the repository.
-3. Render reads `render.yaml`.
-4. Enter `TOTP_SECRET` when prompted.
-5. Deploy and open the generated `onrender.com` URL.
+Generate three independent values:
 
-`TOTP_SECRET` accepts either:
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+python -c "import secrets; print(secrets.token_hex(32))"
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
 
-- A manual Base32 setup key
-- A complete `otpauth://totp/...` URI
+Use them for:
 
-The included Blueprint tracks the `main` branch and uses `autoDeployTrigger: commit`, so pushes to `main` trigger a new Render deployment.
+```text
+SECRET_KEY
+ACCESS_KEY_PEPPER
+DATA_ENCRYPTION_KEY
+```
 
-## Existing Render service
+Add these Render variables:
 
-Open:
+```text
+DATABASE_URL=<persistent PostgreSQL internal URL>
+SECRET_KEY=<first random value>
+ACCESS_KEY_PEPPER=<second random value>
+DATA_ENCRYPTION_KEY=<Fernet value>
 
-`Service → Environment → Edit`
+TOTP_SECRET=<existing Base32 or otpauth URI>
+TOTP_LABEL=Main Software Account
+TOTP_ISSUER=Your Software
 
-Add:
+SOFTWARE_PROVIDER=Gmail
+SOFTWARE_LOGIN_EMAIL=<email used to sign into your software>
+SOFTWARE_LOGIN_PASSWORD=<software account password>
 
-| Key | Value |
-|---|---|
-| `TOTP_SECRET` | Disposable test account Base32 key or full `otpauth://` URI |
-| `TOTP_LABEL` | Optional display label |
-| `TOTP_ISSUER` | Optional issuer, such as `OpenAI` |
+PUBLIC_BASE_URL=https://your-render-service.onrender.com
+```
 
-Select **Save, rebuild, and deploy**. The app reads the variable at process startup.
+`SOFTWARE_LOGIN_PASSWORD` is the password for the software account. It does not need to be the Gmail/Outlook mailbox password unless your own software literally uses that same password.
 
-## Local test
+Do not change `ACCESS_KEY_PEPPER` while active orders exist. Changing it makes all existing buyer keys fail. Do not lose `DATA_ENCRYPTION_KEY`; it is required to retry delivery of an already-created order.
+
+## Database
+
+Create a persistent Render PostgreSQL database and copy its **internal** connection URL into `DATABASE_URL`.
+
+The app creates its tables automatically at startup. SQLite remains available for local testing but should not be used on Render because the web service filesystem is not persistent.
+
+## Test before enabling G2G
+
+Keep:
+
+```text
+G2G_INTEGRATION_ENABLED=false
+SESSION_COOKIE_SECURE=true
+```
+
+For local testing, copy `.env.example` to `.env`, set:
+
+```text
+DATABASE_URL=sqlite:///local.db
+SESSION_COOKIE_SECURE=false
+PUBLIC_BASE_URL=http://127.0.0.1:5000
+```
+
+Install and run:
 
 ```bash
 python -m venv .venv
-```
-
-Windows PowerShell:
-
-```powershell
-.venv\Scripts\Activate.ps1
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-Copy-Item .env.example .env
+python manage.py init-db
+python manage.py create-test-key --order-id LOCAL-001 --name "One hour test" --hours 1
 python app.py
 ```
 
-macOS/Linux:
+Open `http://127.0.0.1:5000` and enter the generated key.
 
-```bash
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-python app.py
-```
-
-Open `http://127.0.0.1:5000`.
-
-## Tests
+Run automated tests:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+## G2G API access
+
+Request OpenAPI/API Integration access from the same G2G seller account that owns the listings. After approval, store the API key, API secret, and seller user ID in Render:
+
+```text
+G2G_API_KEY=
+G2G_API_SECRET=
+G2G_USER_ID=
+```
+
+Do not create or commit a `.env` file containing those secrets.
+
+## Product duration mapping
+
+Create one G2G offer for each subscription duration. Put the exact G2G offer IDs in `G2G_PRODUCTS_JSON`.
+
+```json
+{
+  "REAL_OFFER_ID_30D": {
+    "name": "Software access - 30 days",
+    "duration_days": 30
+  },
+  "REAL_OFFER_ID_90D": {
+    "name": "Software access - 90 days",
+    "duration_days": 90
+  }
+}
+```
+
+Enter the JSON as a single line in Render:
+
+```text
+G2G_PRODUCTS_JSON={"REAL_OFFER_ID_30D":{"name":"Software access - 30 days","duration_days":30},"REAL_OFFER_ID_90D":{"name":"Software access - 90 days","duration_days":90}}
+```
+
+Each offer defaults to a maximum order quantity of one. This prevents one purchase event from being ambiguously treated as multiple subscriptions.
+
+## Webhook
+
+Set the G2G webhook URL to:
+
+```text
+https://your-render-service.onrender.com/webhooks/g2g
+```
+
+Subscribe to:
+
+```text
+order.api_delivery
+order.cancelled
+order.refunded
+```
+
+Create a webhook secret and set:
+
+```text
+G2G_WEBHOOK_SECRET=<same webhook secret>
+G2G_WEBHOOK_CANONICAL_URL=https://your-render-service.onrender.com/webhooks/g2g
+```
+
+The canonical URL must match exactly, including HTTPS, path, and trailing slash.
+
+## Enable automation
+
+After the local key test and webhook signature test pass, set:
+
+```text
+G2G_INTEGRATION_ENABLED=true
+```
+
+Redeploy.
+
+For `order.api_delivery`, the app:
+
+1. verifies the webhook signature;
+2. checks that `seller_id` matches your G2G user ID;
+3. looks up the `offer_id` in `G2G_PRODUCTS_JSON`;
+4. generates a random buyer key;
+5. saves the purchase and expiration;
+6. calls the G2G Deliver Code endpoint;
+7. sends the software provider, login email, software password, portal URL, buyer key, and exact expiration time.
+
+The order ID is unique, so webhook retries reuse the same key instead of creating duplicates.
+
+## Expiration and revocation
+
+Expiration is checked on every portal request. A scheduled job is not required to stop access.
+
+Optional database housekeeping:
+
+```bash
+python manage.py expire-orders
+```
+
+Manual revocation:
+
+```bash
+python manage.py revoke-order --order-id "G2G_ORDER_ID"
+```
+
+Refund and cancellation webhook events revoke the matching order automatically.
+
+## Important deployment notes
+
+- The repository may remain public only because no real secret is committed.
+- Keep the Render environment values private.
+- Use PostgreSQL, not Render's temporary filesystem.
+- Confirm your software account permits the number of simultaneous users you intend to sell.
+- Test a short one-hour offer before selling long durations.
+- Test refund handling before enabling automatic delivery.
+- G2G can update API payload details. If G2G's current developer console shows a different delivery path, set `G2G_DELIVERY_PATH_TEMPLATE` without editing code.

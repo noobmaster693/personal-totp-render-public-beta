@@ -3,47 +3,94 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ issuer }} · Public TOTP Beta</title>
+  <title>{{ issuer }} · Temporary 2FA Access</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  {% if order %}
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  {% endif %}
 </head>
 <body>
   <header class="topbar">
-    <strong>Public TOTP Beta</strong>
-    <span class="badge">No login</span>
+    <strong>Temporary 2FA Access</strong>
+    {% if order %}
+      <form method="post" action="{{ url_for('logout') }}">
+        <button class="link-button" type="submit">Lock portal</button>
+      </form>
+    {% else %}
+      <span class="badge">Access key required</span>
+    {% endif %}
   </header>
 
   <main class="container">
-    <section class="code-card" aria-live="polite">
-      <div class="account-heading">
-        <div class="service-icon" aria-hidden="true">{{ issuer[:1]|upper }}</div>
-        <div>
-          <p class="eyebrow">{{ issuer }}</p>
-          <h1>{{ label }}</h1>
+    {% if order %}
+      <section class="code-card" aria-live="polite">
+        <div class="account-heading">
+          <div class="service-icon" aria-hidden="true">{{ issuer[:1]|upper }}</div>
+          <div>
+            <p class="eyebrow">{{ issuer }}</p>
+            <h1>{{ label }}</h1>
+          </div>
         </div>
-      </div>
 
-      <button id="copy-code" class="code-button" type="button" aria-label="Copy current code">
-        <span id="totp-code">••• •••</span>
-        <span id="copy-label" class="copy-label">Tap to copy</span>
-      </button>
+        <button id="copy-code" class="code-button" type="button" aria-label="Copy current code">
+          <span id="totp-code">••• •••</span>
+          <span id="copy-label" class="copy-label">Tap to copy</span>
+        </button>
 
-      <div class="progress-track" aria-hidden="true">
-        <div id="progress-bar" class="progress-bar"></div>
-      </div>
-      <p id="countdown" class="countdown">Loading code…</p>
-      <p id="status-message" class="status-message" role="status"></p>
-    </section>
+        <div class="progress-track" aria-hidden="true">
+          <div id="progress-bar" class="progress-bar"></div>
+        </div>
+        <p id="countdown" class="countdown">Loading code…</p>
+        <p id="status-message" class="status-message" role="status"></p>
+      </section>
 
-    <section class="info-card">
-      <h2>Render-managed test credential</h2>
-      <p>The website contains no setup form, QR scanner, registration, or credential-editing route. The fixed credential is read only from <code>TOTP_SECRET</code> in Render.</p>
-      <dl>
-        <div><dt>Access</dt><dd>Public</dd></div>
-        <div><dt>Generation</dt><dd>Render server</dd></div>
-        <div><dt>Refresh</dt><dd>{{ period }} seconds</dd></div>
-      </dl>
-    </section>
+      <section class="info-card">
+        <h2>{{ order.product_name }}</h2>
+        <p>Your purchase key has been accepted. Only the current authenticator code is shown; the permanent TOTP setup secret is never sent to the browser.</p>
+        <dl>
+          <div><dt>Provider</dt><dd>{{ provider }}</dd></div>
+          <div><dt>Login email</dt><dd>{{ login_email }}</dd></div>
+          <div><dt>Expires</dt><dd>{{ order.expires_at.isoformat() }}</dd></div>
+          <div><dt>Refresh</dt><dd>{{ period }} seconds</dd></div>
+        </dl>
+      </section>
+    {% else %}
+      <section class="unlock-card">
+        <div class="brand-mark" aria-hidden="true">{{ issuer[:1]|upper }}</div>
+        <p class="eyebrow">{{ issuer }}</p>
+        <h1>Enter your access key</h1>
+        <p>Use the temporary key delivered with your G2G order. It will stop working automatically when your subscription ends.</p>
+
+        <form method="post" action="{{ url_for('unlock') }}" autocomplete="off">
+          <label for="access_key">Temporary access key</label>
+          <input
+            id="access_key"
+            name="access_key"
+            type="password"
+            inputmode="text"
+            autocomplete="off"
+            maxlength="200"
+            placeholder="ACCESS-XXXX-XXXX-..."
+            required
+          >
+          <button class="primary-button" type="submit">Open authenticator</button>
+        </form>
+
+        {% if error %}
+          <p class="error-detail" role="alert">{{ error }}</p>
+        {% endif %}
+      </section>
+
+      <section class="info-card">
+        <h2>How it works</h2>
+        <p>The access key is linked to your purchase and expiration time. After it is accepted, this page provides the current code for the shared software account.</p>
+        <dl>
+          <div><dt>Provider</dt><dd>{{ provider }}</dd></div>
+          <div><dt>Delivery</dt><dd>G2G order</dd></div>
+          <div><dt>Expiration</dt><dd>Automatic</dd></div>
+        </dl>
+      </section>
+    {% endif %}
   </main>
 </body>
 </html>

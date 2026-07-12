@@ -39,9 +39,15 @@ async function fetchCode() {
     const response = await fetch("/api/code", {
       method: "GET",
       cache: "no-store",
+      credentials: "same-origin",
       headers: { "Accept": "application/json" },
     });
     const data = await response.json();
+
+    if (response.status === 401 || response.status === 403) {
+      window.location.assign("/");
+      return;
+    }
     if (!response.ok) throw new Error(data.error || "Unable to retrieve the code.");
 
     currentCode = String(data.code || "");
@@ -58,17 +64,21 @@ async function fetchCode() {
   }
 }
 
-copyButton.addEventListener("click", async () => {
+copyButton?.addEventListener("click", async () => {
   if (!currentCode) return;
   try {
     await navigator.clipboard.writeText(currentCode);
     copyLabel.textContent = "Copied";
-    window.setTimeout(() => { copyLabel.textContent = "Tap to copy"; }, 1400);
+    window.setTimeout(() => {
+      copyLabel.textContent = "Tap to copy";
+    }, 1400);
   } catch {
     statusMessage.textContent = "Copy failed. Select the code manually.";
   }
 });
 
-fetchCode();
-window.setInterval(renderCountdown, 250);
-window.setInterval(fetchCode, 5000);
+if (codeElement) {
+  fetchCode();
+  window.setInterval(renderCountdown, 250);
+  window.setInterval(fetchCode, 5000);
+}
