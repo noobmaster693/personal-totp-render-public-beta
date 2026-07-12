@@ -1,0 +1,60 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #090b10;
+  color: #f4f6fb;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, #182033 0, #090b10 42%); }
+button { font: inherit; cursor: pointer; }
+code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; color: #d8ddff; }
+h1, h2, p { margin-top: 0; }
+
+.topbar {
+  min-height: 68px; display: flex; align-items: center; justify-content: space-between;
+  gap: 18px; padding: 14px max(20px, calc((100vw - 980px)/2));
+  border-bottom: 1px solid rgba(255,255,255,.08); background: rgba(9,11,16,.72);
+  backdrop-filter: blur(16px); position: sticky; top: 0;
+}
+.badge { border: 1px solid rgba(255,255,255,.16); border-radius: 999px; padding: 6px 10px; color: #b9c1d2; font-size: .8rem; }
+.container { width: min(100% - 32px, 760px); margin: 54px auto; display: grid; gap: 22px; }
+.code-card, .info-card, .error-card {
+  border: 1px solid rgba(255,255,255,.1); background: rgba(14,18,28,.92);
+  box-shadow: 0 24px 80px rgba(0,0,0,.42); border-radius: 24px;
+}
+.code-card { padding: 34px; text-align: center; }
+.account-heading { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 30px; text-align: left; }
+.account-heading h1 { margin: 2px 0 0; font-size: 1.55rem; }
+.eyebrow { margin: 0; color: #9ca5b8; font-size: .84rem; letter-spacing: .08em; text-transform: uppercase; }
+.service-icon, .brand-mark {
+  display: grid; place-items: center; font-weight: 800; background: linear-gradient(135deg, #7c5cff, #35c6ff);
+  box-shadow: 0 12px 32px rgba(89,104,255,.35);
+}
+.service-icon { width: 54px; height: 54px; border-radius: 18px; font-size: 1.35rem; }
+.code-button { display: block; width: 100%; border: 0; background: transparent; color: white; padding: 12px; }
+#totp-code { display: block; font-size: clamp(3.2rem, 12vw, 6.2rem); line-height: 1; font-weight: 760; letter-spacing: .09em; font-variant-numeric: tabular-nums; }
+.copy-label { display: block; margin-top: 14px; color: #aeb6c7; font-size: .9rem; }
+.progress-track { height: 8px; margin: 26px auto 12px; max-width: 480px; border-radius: 999px; overflow: hidden; background: #242b39; }
+.progress-bar { height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, #6757ff, #35c6ff); transition: width .2s linear; }
+.countdown { color: #aeb6c7; font-variant-numeric: tabular-nums; }
+.status-message { min-height: 1.4em; color: #ffabb7; }
+.info-card { padding: 26px 30px; }
+.info-card h2 { font-size: 1.12rem; }
+.info-card p { color: #aeb6c7; line-height: 1.65; }
+dl { margin: 22px 0 0; }
+dl div { display: flex; justify-content: space-between; gap: 20px; padding: 12px 0; border-top: 1px solid rgba(255,255,255,.08); }
+dt { color: #9ca5b8; } dd { margin: 0; text-align: right; }
+.centered-page { display: grid; place-items: center; padding: 24px; }
+.error-card { width: min(100%, 500px); padding: 32px; }
+.brand-mark { width: 52px; height: 52px; border-radius: 16px; margin-bottom: 20px; }
+.error-card p { color: #aeb6c7; line-height: 1.6; }
+.error-detail { padding: 12px 14px; background: rgba(202,57,75,.13); border: 1px solid rgba(241,92,108,.35); border-radius: 12px; color: #ffb8c0 !important; }
+
+@media (max-width: 520px) {
+  .topbar { padding-inline: 16px; }
+  .container { margin-top: 30px; }
+  .code-card { padding: 28px 18px; }
+  #totp-code { letter-spacing: .045em; }
+  .info-card { padding: 22px; }
+}
