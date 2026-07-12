@@ -2,16 +2,49 @@ services:
   - type: web
     name: personal-totp-public-beta
     runtime: python
-    plan: free
     branch: main
     autoDeployTrigger: commit
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --workers 1 --threads 4 --timeout 60 app:app
+    startCommand: gunicorn --workers 2 --threads 4 --timeout 60 app:app
     healthCheckPath: /health
     envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: ACCESS_KEY_PEPPER
+        sync: false
+      - key: DATA_ENCRYPTION_KEY
+        sync: false
       - key: TOTP_SECRET
         sync: false
       - key: TOTP_LABEL
-        value: ChatGPT Test Account
+        value: Main Software Account
       - key: TOTP_ISSUER
-        value: OpenAI
+        value: Your Software
+      - key: SOFTWARE_PROVIDER
+        value: Gmail
+      - key: SOFTWARE_LOGIN_EMAIL
+        sync: false
+      - key: SOFTWARE_LOGIN_PASSWORD
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: G2G_INTEGRATION_ENABLED
+        value: "false"
+      - key: G2G_API_BASE
+        value: https://open-api.g2g.com
+      - key: G2G_API_VERSION
+        value: v2
+      - key: G2G_API_KEY
+        sync: false
+      - key: G2G_API_SECRET
+        sync: false
+      - key: G2G_USER_ID
+        sync: false
+      - key: G2G_WEBHOOK_SECRET
+        sync: false
+      - key: G2G_WEBHOOK_CANONICAL_URL
+        sync: false
+      - key: G2G_PRODUCTS_JSON
+        sync: false
