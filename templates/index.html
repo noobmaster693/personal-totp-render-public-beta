@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ issuer }} · Public TOTP Beta</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <strong>Public TOTP Beta</strong>
+    <span class="badge">No login</span>
+  </header>
+
+  <main class="container">
+    <section class="code-card" aria-live="polite">
+      <div class="account-heading">
+        <div class="service-icon" aria-hidden="true">{{ issuer[:1]|upper }}</div>
+        <div>
+          <p class="eyebrow">{{ issuer }}</p>
+          <h1>{{ label }}</h1>
+        </div>
+      </div>
+
+      <button id="copy-code" class="code-button" type="button" aria-label="Copy current code">
+        <span id="totp-code">••• •••</span>
+        <span id="copy-label" class="copy-label">Tap to copy</span>
+      </button>
+
+      <div class="progress-track" aria-hidden="true">
+        <div id="progress-bar" class="progress-bar"></div>
+      </div>
+      <p id="countdown" class="countdown">Loading code…</p>
+      <p id="status-message" class="status-message" role="status"></p>
+    </section>
+
+    <section class="info-card">
+      <h2>Render-managed test credential</h2>
+      <p>The website contains no setup form, QR scanner, registration, or credential-editing route. The fixed credential is read only from <code>TOTP_SECRET</code> in Render.</p>
+      <dl>
+        <div><dt>Access</dt><dd>Public</dd></div>
+        <div><dt>Generation</dt><dd>Render server</dd></div>
+        <div><dt>Refresh</dt><dd>{{ period }} seconds</dd></div>
+      </dl>
+    </section>
+  </main>
+</body>
+</html>
