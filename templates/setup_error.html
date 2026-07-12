@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TOTP setup required</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body class="centered-page">
+  <main class="error-card">
+    <div class="brand-mark" aria-hidden="true">!</div>
+    <h1>Render variable required</h1>
+    <p>Add <code>TOTP_SECRET</code> under your Render service’s Environment page, then save and deploy.</p>
+    <p class="error-detail">{{ error }}</p>
+  </main>
+</body>
+</html>
