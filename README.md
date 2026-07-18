@@ -1,39 +1,66 @@
-# Temporary G2G TOTP Access Portal
+# G2G TOTP Access Portal
 
-This repository combines the existing Render-hosted authenticator page with:
+A Flask portal that issues buyer-specific, expiring access keys and reveals the current TOTP code only while an authorized order is active. It supports G2G webhooks and delivery, PostgreSQL persistence, signed browser sessions, and deployment on Render.
 
-- one shared email-based software account;
-- buyer-specific temporary access keys;
-- automatic expiration;
-- a persistent order database;
-- G2G `order.api_delivery` webhook processing;
-- automatic credential/key delivery through the G2G API;
-- cancellation and refund revocation;
-- rate limiting and signed browser sessions.
+## Responsible use
 
-The permanent TOTP setup secret stays in Render. Buyers receive only the current short-lived code after entering the key linked to their purchase.
+Use this project only with an account and software subscription that you own or are explicitly authorized to distribute, and only when both the software provider and G2G permit the access model. It must not be used to bypass 2FA, evade access controls, resell unauthorized accounts, or expose another person's credentials.
 
-Use this only for software and an email-based account that you own or are authorized to distribute, and only where the software provider and G2G permit the shared-access model.
+The permanent TOTP secret remains on the server. Buyers receive a random access key and can request only the current short-lived code until their order expires or is revoked.
 
-## What changed from the public beta
+## Features
 
-Previously, `/api/code` returned the TOTP code to anyone. It now returns `401` until a valid buyer access key has been entered.
+- Buyer-specific access keys stored as hashes
+- Automatic access expiration and manual revocation
+- Encrypted storage for credentials needed during delivery retries
+- Signed, HTTP-only browser sessions
+- Rate limiting on access-key attempts
+- Persistent order records in PostgreSQL
+- G2G `order.api_delivery` webhook fulfillment
+- Automatic revocation for cancellation and refund events
+- Idempotent processing of repeated order webhooks
+- Render Blueprint configuration
+- RFC 6238 and portal behavior tests
+
+## How it works
 
 ```text
 G2G purchase
-  -> G2G webhook
-  -> generate access key
-  -> save order and expiration
-  -> deliver email/password/portal/key through G2G
-  -> buyer unlocks portal
-  -> portal returns current TOTP until expiration
+  -> signed webhook received
+  -> seller and offer validated
+  -> random buyer access key created
+  -> order and expiration stored
+  -> portal details and key delivered through G2G
+  -> buyer unlocks the portal
+  -> current TOTP code is available until expiration or revocation
 ```
 
-## Render environment variables
+The `/api/code` endpoint returns `401` until a valid buyer key has unlocked a signed session. Expiration is checked on every portal request, so a scheduled job is not required to stop access.
 
-Keep all real secrets in Render, never in GitHub.
+## Requirements
 
-Generate three independent values:
+- Python 3.10 or newer
+- SQLite for local development
+- PostgreSQL for a persistent production deployment
+- A TOTP Base32 secret or complete `otpauth://totp/...` URI
+- Optional: approved G2G OpenAPI/API Integration access
+
+## Local quick start
+
+Clone the project and create a virtual environment:
+
+```bash
+git clone https://github.com/noobmaster693/personal-totp-render-public-beta.git
+cd personal-totp-render-public-beta
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+On Windows Command Prompt, activate with `.venv\Scripts\activate` and copy the template with `copy .env.example .env`.
+
+Generate three independent secrets:
 
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))"
@@ -41,95 +68,102 @@ python -c "import secrets; print(secrets.token_hex(32))"
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Use them for:
+Put the results in `.env` as `SECRET_KEY`, `ACCESS_KEY_PEPPER`, and `DATA_ENCRYPTION_KEY`. For local testing, keep:
 
-```text
-SECRET_KEY
-ACCESS_KEY_PEPPER
-DATA_ENCRYPTION_KEY
-```
-
-Add these Render variables:
-
-```text
-DATABASE_URL=<persistent PostgreSQL internal URL>
-SECRET_KEY=<first random value>
-ACCESS_KEY_PEPPER=<second random value>
-DATA_ENCRYPTION_KEY=<Fernet value>
-
-TOTP_SECRET=<existing Base32 or otpauth URI>
-TOTP_LABEL=Main Software Account
-TOTP_ISSUER=Your Software
-
-SOFTWARE_PROVIDER=Gmail
-SOFTWARE_LOGIN_EMAIL=<email used to sign into your software>
-SOFTWARE_LOGIN_PASSWORD=<software account password>
-
-PUBLIC_BASE_URL=https://your-render-service.onrender.com
-```
-
-`SOFTWARE_LOGIN_PASSWORD` is the password for the software account. It does not need to be the Gmail/Outlook mailbox password unless your own software literally uses that same password.
-
-Do not change `ACCESS_KEY_PEPPER` while active orders exist. Changing it makes all existing buyer keys fail. Do not lose `DATA_ENCRYPTION_KEY`; it is required to retry delivery of an already-created order.
-
-## Database
-
-Create a persistent Render PostgreSQL database and copy its **internal** connection URL into `DATABASE_URL`.
-
-The app creates its tables automatically at startup. SQLite remains available for local testing but should not be used on Render because the web service filesystem is not persistent.
-
-## Test before enabling G2G
-
-Keep:
-
-```text
-G2G_INTEGRATION_ENABLED=false
-SESSION_COOKIE_SECURE=true
-```
-
-For local testing, copy `.env.example` to `.env`, set:
-
-```text
+```dotenv
 DATABASE_URL=sqlite:///local.db
 SESSION_COOKIE_SECURE=false
 PUBLIC_BASE_URL=http://127.0.0.1:5000
+G2G_INTEGRATION_ENABLED=false
 ```
 
-Install and run:
+Set `TOTP_SECRET` to a test credential that you control. Do not use a production secret until the local workflow is verified.
+
+Create the database and a one-hour test key:
 
 ```bash
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
 python manage.py init-db
 python manage.py create-test-key --order-id LOCAL-001 --name "One hour test" --hours 1
 python app.py
 ```
 
-Open `http://127.0.0.1:5000` and enter the generated key.
+Open [http://127.0.0.1:5000](http://127.0.0.1:5000) and enter the generated access key.
 
-Run automated tests:
+## Management commands
+
+| Command | Purpose |
+| --- | --- |
+| `python manage.py init-db` | Create missing database tables. |
+| `python manage.py create-test-key --order-id ID --name NAME --hours N` | Create a manual temporary-access order and print its key. |
+| `python manage.py list-orders` | List stored orders and delivery state. |
+| `python manage.py revoke-order --order-id ID` | Immediately revoke an order. |
+| `python manage.py expire-orders` | Mark due orders as expired for housekeeping. |
+
+Manual key creation prints a raw access key once. Handle terminal logs as sensitive data.
+
+## Run the tests
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-## G2G API access
+The test suite verifies RFC 6238 SHA-1 vectors, locked and unlocked portal behavior, expiration, health reporting, and disabled-by-default G2G webhooks. GitHub Actions runs the same suite on pushes and pull requests.
 
-Request OpenAPI/API Integration access from the same G2G seller account that owns the listings. After approval, store the API key, API secret, and seller user ID in Render:
+## Deploy to Render
+
+The included `render.yaml` defines the Flask web service and Gunicorn start command. A production deployment also needs a persistent Render PostgreSQL database.
+
+1. Create a Render PostgreSQL database.
+2. Deploy this repository as a Blueprint or web service.
+3. Copy the database's internal connection URL into `DATABASE_URL`.
+4. Add the required environment variables listed below.
+5. Keep `G2G_INTEGRATION_ENABLED=false` for the first deployment.
+6. Open `/health` and verify that the application and database are ready.
+7. Create and test a short manual key before configuring G2G.
+
+Use these production settings:
+
+```dotenv
+DATABASE_URL=postgresql://...internal-render-url...
+SESSION_COOKIE_SECURE=true
+PUBLIC_BASE_URL=https://your-service.onrender.com
+```
+
+Do not use SQLite on Render: the web service filesystem is not persistent.
+
+## Required production secrets
+
+Store all real values in Render environment variables, never in GitHub:
 
 ```text
+SECRET_KEY
+ACCESS_KEY_PEPPER
+DATA_ENCRYPTION_KEY
+TOTP_SECRET
+SOFTWARE_LOGIN_EMAIL
+SOFTWARE_LOGIN_PASSWORD
+PUBLIC_BASE_URL
+DATABASE_URL
+```
+
+`SOFTWARE_LOGIN_PASSWORD` is the password for the distributed software account. It is not necessarily the email mailbox password.
+
+Do not change `ACCESS_KEY_PEPPER` while active orders exist; existing access keys will stop validating. Do not lose `DATA_ENCRYPTION_KEY`; it is required to retry delivery for an existing order.
+
+## Configure G2G integration
+
+Request OpenAPI/API Integration access from the same G2G seller account that owns the offers. After approval, configure:
+
+```dotenv
 G2G_API_KEY=
 G2G_API_SECRET=
 G2G_USER_ID=
+G2G_WEBHOOK_SECRET=
 ```
 
-Do not create or commit a `.env` file containing those secrets.
+### Map offers to access durations
 
-## Product duration mapping
-
-Create one G2G offer for each subscription duration. Put the exact G2G offer IDs in `G2G_PRODUCTS_JSON`.
+Create one G2G offer per duration and map the exact offer IDs in `G2G_PRODUCTS_JSON`:
 
 ```json
 {
@@ -144,20 +178,20 @@ Create one G2G offer for each subscription duration. Put the exact G2G offer IDs
 }
 ```
 
-Enter the JSON as a single line in Render:
+Render environment-variable values must be entered on one line:
 
 ```text
 G2G_PRODUCTS_JSON={"REAL_OFFER_ID_30D":{"name":"Software access - 30 days","duration_days":30},"REAL_OFFER_ID_90D":{"name":"Software access - 90 days","duration_days":90}}
 ```
 
-Each offer defaults to a maximum order quantity of one. This prevents one purchase event from being ambiguously treated as multiple subscriptions.
+Each offer defaults to a maximum order quantity of one so that one purchase event cannot be interpreted as multiple subscriptions.
 
-## Webhook
+### Configure the webhook
 
-Set the G2G webhook URL to:
+Set the webhook URL to:
 
 ```text
-https://your-render-service.onrender.com/webhooks/g2g
+https://your-service.onrender.com/webhooks/g2g
 ```
 
 Subscribe to:
@@ -168,61 +202,79 @@ order.cancelled
 order.refunded
 ```
 
-Create a webhook secret and set:
+Set the exact canonical URL used for signature verification:
 
-```text
-G2G_WEBHOOK_SECRET=<same webhook secret>
-G2G_WEBHOOK_CANONICAL_URL=https://your-render-service.onrender.com/webhooks/g2g
+```dotenv
+G2G_WEBHOOK_CANONICAL_URL=https://your-service.onrender.com/webhooks/g2g
 ```
 
-The canonical URL must match exactly, including HTTPS, path, and trailing slash.
+The scheme, hostname, path, and trailing slash must exactly match the URL registered with G2G.
 
-## Enable automation
+### Test and enable
 
-After the local key test and webhook signature test pass, set:
+Before enabling fulfillment:
 
-```text
+- verify a manual one-hour key;
+- test webhook signature rejection and acceptance;
+- confirm the seller ID and offer ID mapping;
+- test delivery using a short-duration test offer;
+- test refund and cancellation revocation.
+
+Then set:
+
+```dotenv
 G2G_INTEGRATION_ENABLED=true
 ```
 
-Redeploy.
+For `order.api_delivery`, the application verifies the signature and seller, validates the offer mapping, creates one key, records its expiration, and calls the G2G Deliver Code endpoint. Repeated webhooks for the same order reuse the existing record instead of creating duplicate access.
 
-For `order.api_delivery`, the app:
+If G2G's current API console uses a different delivery path, set `G2G_DELIVERY_PATH_TEMPLATE` to the documented path without changing application code.
 
-1. verifies the webhook signature;
-2. checks that `seller_id` matches your G2G user ID;
-3. looks up the `offer_id` in `G2G_PRODUCTS_JSON`;
-4. generates a random buyer key;
-5. saves the purchase and expiration;
-6. calls the G2G Deliver Code endpoint;
-7. sends the software provider, login email, software password, portal URL, buyer key, and exact expiration time.
+## Main endpoints
 
-The order ID is unique, so webhook retries reuse the same key instead of creating duplicates.
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Report application and database health. |
+| `GET` | `/` | Show the buyer unlock portal. |
+| `POST` | `/unlock` | Validate an access key and create a signed session. |
+| `POST` | `/logout` | Clear the buyer session. |
+| `GET` | `/api/code` | Return the current TOTP code for an authorized session. |
+| `POST` | `/webhooks/g2g` | Process supported signed G2G order events. |
 
-## Expiration and revocation
+## Configuration reference
 
-Expiration is checked on every portal request. A scheduled job is not required to stop access.
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | SQLite URL locally or PostgreSQL URL in production. |
+| `SECRET_KEY` | Signs Flask browser sessions. |
+| `ACCESS_KEY_PEPPER` | Protects stored access-key hashes. |
+| `DATA_ENCRYPTION_KEY` | Encrypts credentials retained for delivery retries. |
+| `TOTP_SECRET` | Base32 secret or `otpauth://` URI used to generate codes. |
+| `TOTP_LABEL` / `TOTP_ISSUER` | Human-readable account metadata. |
+| `SOFTWARE_PROVIDER` | Name delivered to the buyer. |
+| `SOFTWARE_LOGIN_EMAIL` / `SOFTWARE_LOGIN_PASSWORD` | Authorized software account credentials. |
+| `PUBLIC_BASE_URL` | Public portal origin included in delivery. |
+| `G2G_INTEGRATION_ENABLED` | Enables or disables webhook fulfillment. |
+| `G2G_API_KEY` / `G2G_API_SECRET` / `G2G_USER_ID` | G2G API identity. |
+| `G2G_WEBHOOK_SECRET` | Verifies webhook signatures. |
+| `G2G_WEBHOOK_CANONICAL_URL` | Exact URL used during signature verification. |
+| `G2G_PRODUCTS_JSON` | Maps offer IDs to names and durations. |
+| `RATE_LIMIT_ATTEMPTS` / `RATE_LIMIT_WINDOW_SECONDS` | Controls unlock-attempt throttling. |
 
-Optional database housekeeping:
+See `.env.example` for defaults and the complete set of optional G2G settings.
 
-```bash
-python manage.py expire-orders
-```
+## Production checklist
 
-Manual revocation:
+- Use PostgreSQL and HTTPS.
+- Keep all credentials in Render environment variables.
+- Keep `SESSION_COOKIE_SECURE=true`.
+- Use independent, randomly generated application secrets.
+- Verify that the software license permits the intended users and duration.
+- Limit offer quantity and test short access periods first.
+- Monitor failed webhook delivery and revocation events.
+- Rotate exposed secrets immediately and revoke affected orders.
+- Do not publish screenshots, logs, database exports, or `.env` files containing buyer or account data.
 
-```bash
-python manage.py revoke-order --order-id "G2G_ORDER_ID"
-```
+## Project status
 
-Refund and cancellation webhook events revoke the matching order automatically.
-
-## Important deployment notes
-
-- The repository may remain public only because no real secret is committed.
-- Keep the Render environment values private.
-- Use PostgreSQL, not Render's temporary filesystem.
-- Confirm your software account permits the number of simultaneous users you intend to sell.
-- Test a short one-hour offer before selling long durations.
-- Test refund handling before enabling automatic delivery.
-- G2G can update API payload details. If G2G's current developer console shows a different delivery path, set `G2G_DELIVERY_PATH_TEMPLATE` without editing code.
+This project is an integration template, not a turnkey entitlement or identity platform. Review current G2G documentation and your software provider's terms before production use, and obtain a security review for any deployment handling real credentials or payments.
