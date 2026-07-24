@@ -37,6 +37,7 @@ def app_config(database_url: str, *, g2g_enabled: bool = False) -> dict[str, Any
         "ADMIN_USERNAME": "admin",
         "ADMIN_PASSWORD_HASH": ADMIN_PASSWORD_HASH,
         "ADMIN_TOTP_SECRET": ADMIN_TOTP_SECRET,
+        "ADMIN_TOTP_REQUIRED": True,
         "G2G_INTEGRATION_ENABLED": g2g_enabled,
         "G2G_API_BASE": "https://open-api.g2g.com",
         "G2G_API_VERSION": "v2",

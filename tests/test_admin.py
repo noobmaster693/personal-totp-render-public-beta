@@ -69,6 +69,37 @@ class AdminPortalTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_admin_totp_can_be_disabled_by_environment_flag(self):
+        self.app.config["ADMIN_TOTP_REQUIRED"] = False
+        self.app.config["ADMIN_TOTP_SECRET"] = "intentionally-invalid-and-ignored"
+        response = self.client.get("/admin/login")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b"Administrator authenticator code", response.data)
+
+        response = self.client.post(
+            "/admin/login",
+            data={
+                "_csrf_token": self.csrf(),
+                "username": "admin",
+                "password": ADMIN_PASSWORD,
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Shared-account access", response.data)
+
+    def test_admin_totp_is_required_when_enabled(self):
+        self.client.get("/admin/login")
+        response = self.client.post(
+            "/admin/login",
+            data={
+                "_csrf_token": self.csrf(),
+                "username": "admin",
+                "password": ADMIN_PASSWORD,
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+
     def test_encrypted_account_settings_can_be_updated(self):
         self.login()
         response = self.client.post(

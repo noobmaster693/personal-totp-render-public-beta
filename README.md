@@ -80,7 +80,7 @@ When `APP_ENV=production`, startup readiness requires:
 - HTTPS `G2G_WEBHOOK_CANONICAL_URL` when G2G is enabled;
 - secure session cookies;
 - administrator username and password hash;
-- a separate administrator TOTP secret.
+- a separate administrator TOTP secret when `ADMIN_TOTP_REQUIRED=true`.
 
 SQLite and HTTP remain available for local development and tests.
 
@@ -134,6 +134,7 @@ PUBLIC_BASE_URL=https://your-service.onrender.com
 
 ADMIN_USERNAME=<private administrator username>
 ADMIN_PASSWORD_HASH=<Werkzeug password hash>
+ADMIN_TOTP_REQUIRED=true
 ADMIN_TOTP_SECRET=<separate Base32 secret>
 
 TOTP_SECRET=<shared account Base32 secret or otpauth URI>
@@ -143,6 +144,13 @@ SOFTWARE_PROVIDER=Email
 SOFTWARE_LOGIN_EMAIL=<shared software login>
 SOFTWARE_LOGIN_PASSWORD=<shared software password>
 ```
+
+`ADMIN_TOTP_REQUIRED` defaults to `true`. Set it to `false` to temporarily use
+password-only administrator login; the authenticator field will disappear and
+any configured `ADMIN_TOTP_SECRET` will be ignored. This materially reduces
+admin security, so use a strong unique password and change the value back to
+`true` as soon as practical. The included Render blueprint currently sets it
+to `false` for the requested temporary setup.
 
 The shared account values can later be replaced through `/admin/settings`.
 Database values are encrypted and take precedence over environment fallbacks.
