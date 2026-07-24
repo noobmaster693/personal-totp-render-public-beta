@@ -1,0 +1,24 @@
+{% extends "admin/base.html" %}
+{% block title %}Access key for {{ order.g2g_order_id }}{% endblock %}
+{% block content %}
+  <div class="admin-heading">
+    <div>
+      <p class="eyebrow">Sensitive access</p>
+      <h1>Access key revealed</h1>
+    </div>
+    <a class="secondary-button button-link" href="{{ url_for('admin.order_detail', order_id=order.id) }}">Back to order</a>
+  </div>
+
+  <section class="admin-form-card key-result-card">
+    <p class="security-note"><strong>This action was recorded in the admin audit log.</strong> Copy the key only when needed, do not leave this page open, and send it through a secure channel.</p>
+    <label for="revealed-access-key">Access key</label>
+    <input id="revealed-access-key" class="created-key" value="{{ raw_key }}" readonly autocomplete="off" spellcheck="false">
+
+    <dl>
+      <div><dt>Order reference</dt><dd>{{ order.g2g_order_id }}</dd></div>
+      <div><dt>Buyer username</dt><dd>{{ order.buyer_username or order.buyer_id or "Not supplied" }}</dd></div>
+      <div><dt>Product</dt><dd>{{ order.product_name }}</dd></div>
+      <div><dt>Expires</dt><dd>{{ order.expires_at.isoformat() }}</dd></div>
+    </dl>
+  </section>
+{% endblock %}
