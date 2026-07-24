@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Portal administration{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body class="admin-page">
+  <header class="topbar">
+    <strong>TOTP Portal Administration</strong>
+    {% if session.get("admin_authenticated_at") %}
+      <nav class="admin-nav" aria-label="Administration">
+        <a href="{{ url_for('admin.dashboard') }}">Operations</a>
+        <a href="{{ url_for('admin.settings') }}">Account settings</a>
+        <a href="{{ url_for('index') }}">Buyer portal</a>
+        <form method="post" action="{{ url_for('admin.logout') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button class="link-button" type="submit">Sign out</button>
+        </form>
+      </nav>
+    {% endif %}
+  </header>
+
+  <main class="admin-container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <p class="flash {{ category }}" role="status">{{ message }}</p>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

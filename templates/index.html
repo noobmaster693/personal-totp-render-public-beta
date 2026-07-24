@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
   {% if order %}
     <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  {% else %}
+    <script src="{{ url_for('static', filename='unlock.js') }}" defer></script>
   {% endif %}
 </head>
 <body>
@@ -62,6 +64,8 @@
         <p>Use the temporary key delivered with your G2G order. It will stop working automatically when your subscription ends.</p>
 
         <form method="post" action="{{ url_for('unlock') }}" autocomplete="off">
+          <input id="timezone_hint" name="timezone_hint" type="hidden">
+          <input id="language_hint" name="language_hint" type="hidden">
           <label for="access_key">Temporary access key</label>
           <input
             id="access_key"

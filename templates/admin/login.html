@@ -1,0 +1,19 @@
+{% extends "admin/base.html" %}
+{% block title %}Administrator sign in{% endblock %}
+{% block content %}
+  <section class="admin-login-card">
+    <p class="eyebrow">Restricted</p>
+    <h1>Administrator sign in</h1>
+    <p>Use the administrator credentials configured in the service environment. The administrator TOTP must be separate from the buyer account TOTP.</p>
+    <form method="post" autocomplete="off">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <label for="totp_code">Administrator authenticator code</label>
+      <input id="totp_code" name="totp_code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,10}">
+      <button class="primary-button" type="submit">Sign in</button>
+    </form>
+  </section>
+{% endblock %}

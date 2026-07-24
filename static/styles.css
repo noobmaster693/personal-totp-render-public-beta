@@ -69,6 +69,79 @@ dt { color: #9ca5b8; } dd { margin: 0; text-align: right; overflow-wrap: anywher
 }
 .error-list { padding-left: 34px; line-height: 1.6; }
 
+a { color: #9fcfff; }
+.admin-page { background: #090b10; }
+.admin-nav { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
+.admin-nav a { color: #c9d1df; text-decoration: none; }
+.admin-nav a:hover { color: #fff; }
+.admin-nav form, .admin-actions form, .row-actions form { margin: 0; }
+.admin-container { width: min(100% - 32px, 1500px); margin: 36px auto 80px; }
+.admin-heading {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  gap: 24px; margin-bottom: 24px;
+}
+.admin-heading h1 { margin-bottom: 0; }
+.admin-actions, .row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.metric-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px; margin-bottom: 22px;
+}
+.metric-grid article, .admin-panel, .admin-form-card, .admin-login-card {
+  border: 1px solid rgba(255,255,255,.1); background: rgba(14,18,28,.94);
+  box-shadow: 0 20px 60px rgba(0,0,0,.3); border-radius: 18px;
+}
+.metric-grid article { padding: 20px; }
+.metric-grid span { display: block; color: #9ca5b8; font-size: .82rem; }
+.metric-grid strong { display: block; margin-top: 6px; font-size: 1.9rem; }
+.admin-panel { margin-top: 18px; padding: 22px; }
+.admin-panel h2 { font-size: 1.05rem; }
+.table-scroll { width: 100%; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+th, td {
+  padding: 11px 10px; border-top: 1px solid rgba(255,255,255,.08);
+  text-align: left; vertical-align: top;
+}
+th { color: #9ca5b8; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
+td small { color: #929cad; overflow-wrap: anywhere; }
+td details { max-width: 320px; margin-top: 6px; }
+td details p { color: #ffb8c0; overflow-wrap: anywhere; }
+.status {
+  display: inline-block; border-radius: 999px; padding: 3px 8px;
+  border: 1px solid rgba(255,255,255,.14); font-size: .74rem;
+}
+.status.active, .status.delivered, .status.processed { color: #8df0bd; border-color: rgba(69,205,135,.45); }
+.status.failed, .status.revoked, .status.conflict { color: #ffabb7; border-color: rgba(241,92,108,.45); }
+.status.pending, .status.delivering, .status.processing { color: #ffdb92; border-color: rgba(255,190,73,.45); }
+.row-actions button, .secondary-button, .danger-button {
+  border: 1px solid #465064; border-radius: 9px; padding: 7px 9px;
+  background: #151b27; color: #eaf0fb;
+}
+.danger-button { border-color: rgba(241,92,108,.48) !important; color: #ffb8c0 !important; }
+.secondary-button { padding: 10px 12px; }
+.split-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+.admin-login-card, .admin-form-card {
+  width: min(100%, 780px); margin: 50px auto; padding: 30px;
+}
+.admin-login-card { max-width: 480px; }
+.admin-login-card p, .admin-form-card p { color: #aeb6c7; line-height: 1.6; }
+.admin-login-card label, .admin-form-card label {
+  display: block; margin: 18px 0 7px; font-weight: 700;
+}
+.admin-login-card input, .admin-form-card input {
+  width: 100%; border: 1px solid #465064; border-radius: 11px;
+  padding: 12px 13px; background: #090c13; color: #fff; outline: none;
+}
+.admin-login-card input:focus, .admin-form-card input:focus {
+  border-color: #6e67ff; box-shadow: 0 0 0 3px rgba(110,103,255,.18);
+}
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
+.compact-button { width: auto; min-width: 220px; }
+.flash {
+  padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,.14);
+}
+.flash.success { color: #a9f2cb; border-color: rgba(69,205,135,.45); background: rgba(69,205,135,.1); }
+.flash.error { color: #ffb8c0; border-color: rgba(241,92,108,.4); background: rgba(202,57,75,.12); }
+
 @media (max-width: 520px) {
   .topbar { padding-inline: 16px; }
   .container { margin-top: 30px; }
@@ -77,4 +150,10 @@ dt { color: #9ca5b8; } dd { margin: 0; text-align: right; overflow-wrap: anywher
   .info-card, .unlock-card { padding: 22px; }
   dl div { align-items: flex-start; flex-direction: column; gap: 4px; }
   dd { text-align: left; }
+}
+
+@media (max-width: 900px) {
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .split-panels, .form-grid { grid-template-columns: 1fr; }
+  .admin-heading { align-items: flex-start; flex-direction: column; }
 }

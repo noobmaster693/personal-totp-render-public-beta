@@ -5,9 +5,11 @@ services:
     branch: main
     autoDeployTrigger: commit
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --workers 2 --threads 4 --timeout 60 app:app
-    healthCheckPath: /health
+    startCommand: alembic upgrade head && gunicorn --workers 2 --threads 4 --timeout 60 app:app
+    healthCheckPath: /ready
     envVars:
+      - key: APP_ENV
+        value: production
       - key: DATABASE_URL
         sync: false
       - key: SECRET_KEY
@@ -30,6 +32,12 @@ services:
         sync: false
       - key: PUBLIC_BASE_URL
         sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: ADMIN_TOTP_SECRET
+        sync: false
       - key: G2G_INTEGRATION_ENABLED
         value: "false"
       - key: G2G_API_BASE
@@ -48,3 +56,9 @@ services:
         sync: false
       - key: G2G_PRODUCTS_JSON
         sync: false
+      - key: G2G_DELIVERY_MAX_ATTEMPTS
+        value: "8"
+      - key: G2G_DELIVERY_RETRY_BASE_SECONDS
+        value: "60"
+      - key: G2G_DELIVERY_STALE_SECONDS
+        value: "120"

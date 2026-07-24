@@ -1,0 +1,13 @@
+{
+  "id": "a8d99337-ea80-40c8-8b75-6c4cc191668a-1",
+  "event_happened_at": 1666017142604,
+  "event_type": "order.refunded",
+  "payload": {
+    "order_id": "1670568841157TEST-1",
+    "buyer_id": "684896",
+    "seller_id": "685064",
+    "offer_id": "G16704985465TEST",
+    "purchased_qty": 1,
+    "refunded_qty": 1
+  }
+}

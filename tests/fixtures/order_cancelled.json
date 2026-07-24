@@ -1,0 +1,13 @@
+{
+  "id": "341a6ae1-34da-486e-b984-91a6f44cea07",
+  "event_happened_at": 1652090542890,
+  "event_type": "order.cancelled",
+  "payload": {
+    "order_id": "1670568841157TEST-1",
+    "buyer_id": "684896",
+    "seller_id": "685064",
+    "offer_id": "G16704985465TEST",
+    "purchased_qty": 1,
+    "delivered_qty": 0
+  }
+}

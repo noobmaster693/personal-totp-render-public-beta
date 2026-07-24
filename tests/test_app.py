@@ -5,12 +5,12 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from cryptography.fernet import Fernet
-
 from app import create_app
 from extensions import db
+from models import BuyerSession
 from services import create_manual_order
-from totp import TOTPConfig, generate_totp
+from tests.helpers import app_config
+from totp import TOTPConfig, generate_totp, verify_totp
 
 
 class RFC6238Tests(unittest.TestCase):
@@ -35,6 +35,7 @@ class RFC6238Tests(unittest.TestCase):
             with self.subTest(timestamp=timestamp):
                 code, _ = generate_totp(config, timestamp)
                 self.assertEqual(code, expected)
+                self.assertTrue(verify_totp(config, code, timestamp, window=0))
 
 
 class PortalTests(unittest.TestCase):
@@ -42,25 +43,10 @@ class PortalTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         database_path = Path(self.temp_dir.name) / "test.db"
         self.app = create_app(
-            {
-                "TESTING": True,
-                "SECRET_KEY": "test-secret",
-                "ACCESS_KEY_PEPPER": "test-pepper",
-                "DATA_ENCRYPTION_KEY": Fernet.generate_key().decode(),
-                "SQLALCHEMY_DATABASE_URI": f"sqlite:///{database_path}",
-                "TOTP_SECRET": "JBSWY3DPEHPK3PXP",
-                "TOTP_LABEL": "Test Account",
-                "TOTP_ISSUER": "Test Software",
-                "SOFTWARE_PROVIDER": "Gmail",
-                "SOFTWARE_LOGIN_EMAIL": "test@example.com",
-                "SOFTWARE_LOGIN_PASSWORD": "test-password",
-                "PUBLIC_BASE_URL": "http://localhost",
-                "G2G_INTEGRATION_ENABLED": False,
-            }
+            app_config(f"sqlite:///{database_path}", g2g_enabled=False)
         )
         self.client = self.app.test_client()
         with self.app.app_context():
-            db.drop_all()
             db.create_all()
 
     def tearDown(self):
@@ -73,18 +59,22 @@ class PortalTests(unittest.TestCase):
         response = self.client.get("/api/code")
         self.assertEqual(response.status_code, 401)
 
-    def test_valid_key_unlocks_code(self):
+    def test_valid_key_creates_revocable_server_side_session(self):
         with self.app.app_context():
             order, raw_key = create_manual_order(
                 order_id="LOCAL-1",
                 product_name="One-hour test",
                 duration_seconds=3600,
             )
-            self.assertEqual(order.status, "active")
+            order_id = order.id
 
         response = self.client.post(
             "/unlock",
-            data={"access_key": raw_key},
+            data={
+                "access_key": raw_key,
+                "timezone_hint": "Europe/Paris",
+                "language_hint": "fr-FR",
+            },
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
@@ -96,6 +86,17 @@ class PortalTests(unittest.TestCase):
         self.assertTrue(payload["code"].isdigit())
         self.assertEqual(len(payload["code"]), 6)
 
+        with self.app.app_context():
+            buyer_session = db.session.scalar(
+                db.select(BuyerSession).where(BuyerSession.order_id == order_id)
+            )
+            self.assertEqual(buyer_session.timezone_hint, "Europe/Paris")
+            buyer_session.revoked_at = datetime.now(timezone.utc)
+            db.session.commit()
+
+        response = self.client.get("/api/code")
+        self.assertEqual(response.status_code, 403)
+
     def test_expired_key_is_rejected(self):
         with self.app.app_context():
             order, raw_key = create_manual_order(
@@ -106,17 +107,25 @@ class PortalTests(unittest.TestCase):
             order.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
             db.session.commit()
 
-        response = self.client.post(
-            "/unlock",
-            data={"access_key": raw_key},
-        )
+        response = self.client.post("/unlock", data={"access_key": raw_key})
         self.assertEqual(response.status_code, 403)
         self.assertIn(b"expired", response.data.lower())
 
-    def test_health(self):
-        response = self.client.get("/health")
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.get_json()["database"])
+    def test_liveness_and_readiness_are_separate(self):
+        live = self.client.get("/live")
+        ready = self.client.get("/ready")
+        self.assertEqual(live.status_code, 200)
+        self.assertEqual(ready.status_code, 200)
+        self.assertTrue(ready.get_json()["database"])
+        self.assertTrue(ready.get_json()["migrations"])
+
+    def test_readiness_fails_when_migration_metadata_is_missing(self):
+        self.app.config["SKIP_MIGRATION_CHECK"] = False
+        response = self.client.get("/ready")
+        self.assertEqual(response.status_code, 503)
+        payload = response.get_json()
+        self.assertTrue(payload["database"])
+        self.assertFalse(payload["migrations"])
 
     def test_webhook_is_disabled_by_default(self):
         response = self.client.post("/webhooks/g2g", json={})
