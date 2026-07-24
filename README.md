@@ -244,7 +244,9 @@ The admin dashboard shows:
 Orders are clickable for a full purchase, delivery, key-use, session, and IP
 history. The admin can also create manual access keys that use the same secure
 hashing, expiry, session tracking, and revocation flow as G2G keys. A newly
-created plaintext key is displayed once on the creation result page.
+created plaintext key is displayed on the creation result page. An
+authenticated administrator can explicitly reveal a stored key from its order
+page; every reveal is CSRF-protected and recorded in the admin audit log.
 
 The visitor report records IP address, browser user agent, and timestamp only
 for public `GET /` visits. It does not record health checks, webhooks, admin

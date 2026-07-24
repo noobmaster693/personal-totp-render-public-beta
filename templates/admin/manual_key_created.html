@@ -16,7 +16,7 @@
     <p class="flash success" role="status">The access key is ready. Copy it now and send it to the buyer through a secure channel.</p>
     <label for="created-access-key">Access key</label>
     <input id="created-access-key" class="created-key" value="{{ raw_key }}" readonly autocomplete="off" spellcheck="false">
-    <p class="security-note"><strong>This is the only admin screen that displays this plaintext key.</strong> Later order pages show metadata and usage, but not the key itself.</p>
+    <p class="security-note"><strong>The key is hidden on normal order pages.</strong> An authenticated administrator can explicitly reveal it later, and every reveal is recorded in the admin audit log.</p>
 
     <dl>
       <div><dt>Order reference</dt><dd>{{ order.g2g_order_id }}</dd></div>

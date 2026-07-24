@@ -120,7 +120,7 @@ class AdminPortalTests(unittest.TestCase):
             self.assertIsNotNone(buyer_session.revoked_at)
         self.assertEqual(buyer.get("/api/code").status_code, 403)
 
-    def test_admin_can_create_a_manual_key_and_plaintext_is_shown_once(self):
+    def test_admin_can_create_and_explicitly_reveal_a_manual_key(self):
         self.login()
         response = self.client.get("/admin/orders/new")
         self.assertEqual(response.status_code, 200)
@@ -160,6 +160,31 @@ class AdminPortalTests(unittest.TestCase):
         detail = self.client.get(f"/admin/orders/{order_id}")
         self.assertEqual(detail.status_code, 200)
         self.assertNotIn(raw_key.encode(), detail.data)
+        self.assertEqual(
+            self.client.get(f"/admin/orders/{order_id}/key").status_code,
+            405,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/admin/orders/{order_id}/key",
+                data={"_csrf_token": "wrong"},
+            ).status_code,
+            400,
+        )
+
+        revealed = self.client.post(
+            f"/admin/orders/{order_id}/key",
+            data={"_csrf_token": self.csrf()},
+        )
+        self.assertEqual(revealed.status_code, 200)
+        self.assertIn(raw_key.encode(), revealed.data)
+        self.assertIn(b"This action was recorded", revealed.data)
+        with self.app.app_context():
+            reveal_audit = db.session.scalar(
+                db.select(AdminAudit).where(AdminAudit.action == "access_key_revealed")
+            )
+            self.assertIsNotNone(reveal_audit)
+            self.assertEqual(reveal_audit.target_id, str(order_id))
 
         buyer = self.app.test_client()
         unlock = buyer.post(

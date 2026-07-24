@@ -8,6 +8,7 @@ import secrets
 import time
 from datetime import datetime, timedelta, timezone
 
+from cryptography.fernet import InvalidToken
 from flask import (
     Blueprint,
     abort,
@@ -34,7 +35,7 @@ from models import (
     VisitorEvent,
     WebhookEvent,
 )
-from security import generate_csrf_token
+from security import decrypt_text, generate_csrf_token
 from services import (
     cleanup_operational_data,
     create_manual_order,
@@ -423,6 +424,41 @@ def order_detail(order_id: int):
         delivery_attempts=delivery_attempts,
         webhook_events=webhook_events,
         ip_summary=ip_summary,
+    )
+
+
+@admin.post("/orders/<int:order_id>/key")
+@admin_required
+def reveal_order_key(order_id: int):
+    _check_csrf()
+    order = db.session.get(Order, order_id)
+    if order is None:
+        abort(404)
+
+    try:
+        raw_key = decrypt_text(order.access_key_ciphertext)
+    except InvalidToken:
+        audit(
+            "access_key_reveal_failed",
+            target_type="order",
+            target_id=str(order.id),
+            details={"order_reference": order.g2g_order_id},
+        )
+        db.session.commit()
+        flash("The stored access key could not be decrypted.", "error")
+        return redirect(url_for("admin.order_detail", order_id=order.id))
+
+    audit(
+        "access_key_revealed",
+        target_type="order",
+        target_id=str(order.id),
+        details={"order_reference": order.g2g_order_id},
+    )
+    db.session.commit()
+    return render_template(
+        "admin/reveal_key.html",
+        order=order,
+        raw_key=raw_key,
     )
 
 

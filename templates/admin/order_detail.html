@@ -8,6 +8,10 @@
     </div>
     <div class="admin-actions">
       <a class="secondary-button button-link" href="{{ url_for('admin.dashboard') }}">Back to orders</a>
+      <form method="post" action="{{ url_for('admin.reveal_order_key', order_id=order.id) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button class="secondary-button" type="submit">Reveal access key</button>
+      </form>
       {% if order.offer_id != "MANUAL" %}
         <form method="post" action="{{ url_for('admin.retry_order_route', order_id=order.id) }}">
           <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -57,7 +61,7 @@
       <div><dt>Delivered</dt><dd>{{ order.delivered_at.isoformat() if order.delivered_at else "Not recorded" }}</dd></div>
       <div><dt>Revoked</dt><dd>{{ order.revoked_at.isoformat() if order.revoked_at else "No" }}</dd></div>
       <div><dt>Delivery ID</dt><dd>{{ order.g2g_delivery_id or "Not resolved" }}</dd></div>
-      <div><dt>Access key</dt><dd>Hidden; plaintext is only shown at manual creation or sent during fulfillment.</dd></div>
+      <div><dt>Access key</dt><dd>Hidden until an administrator explicitly reveals it. Every reveal is audited.</dd></div>
       {% if order.last_error %}
         <div><dt>Last error</dt><dd class="error-text">{{ order.last_error }}</dd></div>
       {% endif %}
