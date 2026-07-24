@@ -89,12 +89,17 @@ class WebhookTests(unittest.TestCase):
     def test_documented_fixture_fulfills_without_root_delivery_id(
         self, resolve_mock, deliver_mock
     ):
-        response = self.post(fixture("order_api_delivery.json"))
+        payload = fixture("order_api_delivery.json")
+        payload["payload"]["additional_info_list"] = [
+            {"label": "Account username", "value": "fixture-buyer-name"}
+        ]
+        response = self.post(payload)
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
 
         with self.app.app_context():
             order = db.session.scalar(db.select(Order))
             self.assertEqual(order.quantity, 1)
+            self.assertEqual(order.buyer_username, "fixture-buyer-name")
             self.assertEqual(order.g2g_delivery_id, "D1671612731000")
             self.assertEqual(order.delivery_status, "delivered")
             event = db.session.scalar(db.select(WebhookEvent))

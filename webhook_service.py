@@ -226,6 +226,46 @@ def _fulfillment_fields(parsed: ParsedWebhook) -> dict[str, Any]:
     buyer_id = (
         str(_nested(payload, ("buyer_id",), ("buyer", "id")) or "").strip() or None
     )
+    buyer_username = (
+        str(
+            _nested(
+                payload,
+                ("buyer_username",),
+                ("buyer", "username"),
+                ("buyer", "name"),
+                ("username",),
+            )
+            or ""
+        ).strip()
+        or None
+    )
+    if buyer_username is None:
+        additional_info = payload.get("additional_info_list")
+        if isinstance(additional_info, list):
+            for item in additional_info:
+                if not isinstance(item, dict):
+                    continue
+                label = str(
+                    item.get("name")
+                    or item.get("label")
+                    or item.get("key")
+                    or item.get("type")
+                    or ""
+                ).strip()
+                normalized_label = label.lower().replace("_", " ")
+                if "username" not in normalized_label and normalized_label not in {
+                    "user name",
+                    "account name",
+                }:
+                    continue
+                value = str(
+                    item.get("value") or item.get("answer") or item.get("text") or ""
+                ).strip()
+                if value:
+                    buyer_username = value
+                    break
+    if buyer_username:
+        buyer_username = buyer_username[:160]
     seller_id = str(_nested(payload, ("seller_id",), ("seller", "id")) or "").strip()
 
     quantity_value = _nested(
@@ -269,6 +309,7 @@ def _fulfillment_fields(parsed: ParsedWebhook) -> dict[str, Any]:
     }
     return {
         **identity,
+        "buyer_username": buyer_username,
         "identity_digest": _digest(identity),
         "delivery_id": delivery_id,
         "purchased_at": purchased_at,
@@ -334,6 +375,7 @@ def _process_fulfillment(
             delivery_id=fields["delivery_id"],
             offer_id=fields["offer_id"],
             buyer_id=fields["buyer_id"],
+            buyer_username=fields["buyer_username"],
             quantity=fields["quantity"],
             purchased_at=fields["purchased_at"],
             source_payload_digest=fields["identity_digest"],
@@ -349,6 +391,8 @@ def _process_fulfillment(
             )
         if not order.source_payload_digest:
             order.source_payload_digest = fields["identity_digest"]
+        if fields["buyer_username"] and not order.buyer_username:
+            order.buyer_username = fields["buyer_username"]
         if fields["delivery_id"] and not order.g2g_delivery_id:
             order.g2g_delivery_id = fields["delivery_id"]
         order.last_event_id = event.event_id

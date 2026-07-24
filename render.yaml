@@ -62,3 +62,7 @@ services:
         value: "60"
       - key: G2G_DELIVERY_STALE_SECONDS
         value: "120"
+      - key: VISITOR_LOG_ENABLED
+        value: "true"
+      - key: VISITOR_LOG_RETENTION_DAYS
+        value: "90"

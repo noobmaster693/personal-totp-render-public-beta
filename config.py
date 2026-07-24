@@ -157,7 +157,11 @@ def build_config() -> dict[str, Any]:
             os.getenv("MAX_ACTIVE_SESSIONS_PER_ORDER", "0")
         ),
         "MAX_DISTINCT_IPS_PER_ORDER": int(os.getenv("MAX_DISTINCT_IPS_PER_ORDER", "0")),
-        "MIGRATION_HEAD": "20260724_0001",
+        "VISITOR_LOG_ENABLED": env_bool("VISITOR_LOG_ENABLED", True),
+        "VISITOR_LOG_RETENTION_DAYS": int(
+            os.getenv("VISITOR_LOG_RETENTION_DAYS", "90")
+        ),
+        "MIGRATION_HEAD": "20260724_0002",
         "SKIP_MIGRATION_CHECK": False,
     }
 

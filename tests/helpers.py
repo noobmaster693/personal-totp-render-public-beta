@@ -70,6 +70,8 @@ def app_config(database_url: str, *, g2g_enabled: bool = False) -> dict[str, Any
         "RATE_LIMIT_WINDOW_SECONDS": 300,
         "MAX_ACTIVE_SESSIONS_PER_ORDER": 0,
         "MAX_DISTINCT_IPS_PER_ORDER": 0,
+        "VISITOR_LOG_ENABLED": True,
+        "VISITOR_LOG_RETENTION_DAYS": 90,
         "SKIP_MIGRATION_CHECK": True,
     }
 

@@ -24,6 +24,7 @@ from g2g import verify_webhook_signature
 from services import (
     active_buyer_session,
     create_buyer_session,
+    record_public_visit,
     verify_buyer_key,
 )
 from settings_service import AccountSettings, get_account_settings
@@ -161,6 +162,19 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     @app.get("/")
     def index():
+        if request.method == "GET":
+            try:
+                record_public_visit(
+                    ip_address=_client_ip(),
+                    user_agent=request.headers.get("User-Agent", ""),
+                    path=request.path,
+                )
+            except SQLAlchemyError:
+                db.session.rollback()
+                app.logger.warning(
+                    "Could not record public visitor event", exc_info=True
+                )
+
         account, errors = account_or_errors()
         if errors or account is None:
             return render_template("setup_error.html", errors=errors), 503

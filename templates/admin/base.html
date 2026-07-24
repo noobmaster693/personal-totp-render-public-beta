@@ -12,6 +12,8 @@
     {% if session.get("admin_authenticated_at") %}
       <nav class="admin-nav" aria-label="Administration">
         <a href="{{ url_for('admin.dashboard') }}">Operations</a>
+        <a href="{{ url_for('admin.create_manual_key') }}">Create key</a>
+        <a href="{{ url_for('admin.visitors') }}">Visitors</a>
         <a href="{{ url_for('admin.settings') }}">Account settings</a>
         <a href="{{ url_for('index') }}">Buyer portal</a>
         <form method="post" action="{{ url_for('admin.logout') }}">

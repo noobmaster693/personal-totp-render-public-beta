@@ -3,6 +3,8 @@ from __future__ import annotations
 import functools
 import hmac
 import json
+import re
+import secrets
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -17,21 +19,25 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
+from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash
 
 from extensions import db
 from models import (
+    AccessAttempt,
     AdminAudit,
     BuyerSession,
     CancellationTombstone,
     DeliveryAttempt,
     Order,
+    VisitorEvent,
     WebhookEvent,
 )
 from security import generate_csrf_token
 from services import (
     cleanup_operational_data,
+    create_manual_order,
     revoke_buyer_sessions,
     revoke_order,
     revoke_session,
@@ -123,6 +129,12 @@ def _login_rate_limited() -> bool:
         )
     )
     return int(count or 0) >= int(current_app.config["ADMIN_LOGIN_ATTEMPTS"])
+
+
+def _order_action_redirect(order_id: int):
+    if request.form.get("return_to") == "order":
+        return redirect(url_for("admin.order_detail", order_id=order_id))
+    return redirect(url_for("admin.dashboard"))
 
 
 @admin.app_context_processor
@@ -232,7 +244,15 @@ def dashboard():
             select(func.count(WebhookEvent.id)).where(WebhookEvent.status == "conflict")
         )
         or 0,
+        "unique_visitors": db.session.scalar(
+            select(func.count(func.distinct(VisitorEvent.ip_address))).where(
+                VisitorEvent.visited_at
+                >= datetime.now(timezone.utc) - timedelta(days=30)
+            )
+        )
+        or 0,
     }
+    retention_days = int(current_app.config["VISITOR_LOG_RETENTION_DAYS"])
     return render_template(
         "admin/dashboard.html",
         orders=orders,
@@ -241,6 +261,204 @@ def dashboard():
         buyer_sessions=buyer_sessions,
         tombstones=tombstones,
         counts=counts,
+        retention_days=retention_days,
+    )
+
+
+@admin.route("/orders/new", methods=["GET", "POST"])
+@admin_required
+def create_manual_key():
+    if request.method == "GET":
+        return render_template("admin/manual_order.html")
+
+    _check_csrf()
+    order_reference = request.form.get("order_reference", "").strip()
+    buyer_username = request.form.get("buyer_username", "").strip()
+    product_name = request.form.get("product_name", "").strip()
+    duration_unit = request.form.get("duration_unit", "days")
+    try:
+        duration_value = int(request.form.get("duration_value", "0"))
+    except ValueError:
+        duration_value = 0
+
+    errors = []
+    if order_reference and not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._:-]{1,159}", order_reference
+    ):
+        errors.append(
+            "Order reference must use 2–160 letters, numbers, dots, underscores, "
+            "colons, or hyphens."
+        )
+    if len(buyer_username) > 160:
+        errors.append("Buyer username must be 160 characters or fewer.")
+    if not product_name or len(product_name) > 240:
+        errors.append("Product name is required and must be 240 characters or fewer.")
+    multiplier = {"hours": 3600, "days": 86400}.get(duration_unit)
+    if multiplier is None or duration_value < 1:
+        errors.append("Choose a positive duration in hours or days.")
+    duration_seconds = duration_value * (multiplier or 0)
+    if duration_seconds > 10 * 365 * 86400:
+        errors.append("Manual access cannot exceed 10 years.")
+
+    if not order_reference:
+        order_reference = (
+            f"MANUAL-{datetime.now(timezone.utc):%Y%m%d%H%M%S}-"
+            f"{secrets.token_hex(3).upper()}"
+        )
+    if db.session.scalar(select(Order.id).where(Order.g2g_order_id == order_reference)):
+        errors.append("That order reference already exists.")
+
+    if errors:
+        for error in errors:
+            flash(error, "error")
+        return (
+            render_template(
+                "admin/manual_order.html",
+                form={
+                    "order_reference": request.form.get("order_reference", ""),
+                    "buyer_username": buyer_username,
+                    "product_name": product_name,
+                    "duration_value": request.form.get("duration_value", ""),
+                    "duration_unit": duration_unit,
+                },
+            ),
+            400,
+        )
+
+    try:
+        order, raw_key = create_manual_order(
+            order_id=order_reference,
+            product_name=product_name,
+            duration_seconds=duration_seconds,
+            buyer_username=buyer_username or None,
+            return_existing=False,
+        )
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return render_template("admin/manual_order.html"), 409
+    except IntegrityError:
+        db.session.rollback()
+        flash("That order reference was created by another request.", "error")
+        return render_template("admin/manual_order.html"), 409
+
+    audit(
+        "manual_order_created",
+        target_type="order",
+        target_id=str(order.id),
+        details={
+            "order_reference": order.g2g_order_id,
+            "duration_seconds": duration_seconds,
+        },
+    )
+    db.session.commit()
+    return render_template(
+        "admin/manual_key_created.html",
+        order=order,
+        raw_key=raw_key,
+    )
+
+
+@admin.get("/orders/<int:order_id>")
+@admin_required
+def order_detail(order_id: int):
+    order = db.session.get(Order, order_id)
+    if order is None:
+        abort(404)
+
+    now = datetime.now(timezone.utc)
+    buyer_sessions = db.session.scalars(
+        select(BuyerSession)
+        .where(BuyerSession.order_id == order.id)
+        .order_by(BuyerSession.last_seen_at.desc())
+    ).all()
+    access_attempts = db.session.scalars(
+        select(AccessAttempt)
+        .where(AccessAttempt.order_id == order.id)
+        .order_by(AccessAttempt.created_at.desc())
+        .limit(200)
+    ).all()
+    delivery_attempts = db.session.scalars(
+        select(DeliveryAttempt)
+        .where(DeliveryAttempt.order_id == order.id)
+        .order_by(DeliveryAttempt.id.desc())
+    ).all()
+    webhook_events = db.session.scalars(
+        select(WebhookEvent)
+        .where(WebhookEvent.g2g_order_id == order.g2g_order_id)
+        .order_by(WebhookEvent.received_at.desc())
+    ).all()
+    ip_summary = (
+        db.session.execute(
+            select(
+                BuyerSession.ip_address.label("ip_address"),
+                func.count(BuyerSession.id).label("session_count"),
+                func.min(BuyerSession.created_at).label("first_seen"),
+                func.max(BuyerSession.last_seen_at).label("last_seen"),
+                func.sum(
+                    case(
+                        (
+                            BuyerSession.revoked_at.is_(None)
+                            & (BuyerSession.expires_at > now),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ).label("active_sessions"),
+            )
+            .where(BuyerSession.order_id == order.id)
+            .group_by(BuyerSession.ip_address)
+            .order_by(func.max(BuyerSession.last_seen_at).desc())
+        )
+        .mappings()
+        .all()
+    )
+
+    return render_template(
+        "admin/order_detail.html",
+        order=order,
+        now=now,
+        buyer_sessions=buyer_sessions,
+        access_attempts=access_attempts,
+        delivery_attempts=delivery_attempts,
+        webhook_events=webhook_events,
+        ip_summary=ip_summary,
+    )
+
+
+@admin.get("/visitors")
+@admin_required
+def visitors():
+    retention_days = int(current_app.config["VISITOR_LOG_RETENTION_DAYS"])
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    visitor_summary = (
+        db.session.execute(
+            select(
+                VisitorEvent.ip_address.label("ip_address"),
+                func.count(VisitorEvent.id).label("visit_count"),
+                func.min(VisitorEvent.visited_at).label("first_seen"),
+                func.max(VisitorEvent.visited_at).label("last_seen"),
+            )
+            .where(VisitorEvent.visited_at >= cutoff)
+            .group_by(VisitorEvent.ip_address)
+            .order_by(func.max(VisitorEvent.visited_at).desc())
+            .limit(500)
+        )
+        .mappings()
+        .all()
+    )
+    recent_visits = db.session.scalars(
+        select(VisitorEvent)
+        .where(VisitorEvent.visited_at >= cutoff)
+        .order_by(VisitorEvent.visited_at.desc())
+        .limit(200)
+    ).all()
+    return render_template(
+        "admin/visitors.html",
+        visitor_summary=visitor_summary,
+        recent_visits=recent_visits,
+        retention_days=retention_days,
+        visitor_log_enabled=bool(current_app.config["VISITOR_LOG_ENABLED"]),
     )
 
 
@@ -286,7 +504,7 @@ def revoke_order_route(order_id: int):
     audit("order_revoked", target_type="order", target_id=str(order_id))
     db.session.commit()
     flash(f"Order {g2g_order_id} revoked.", "success")
-    return redirect(url_for("admin.dashboard"))
+    return _order_action_redirect(order_id)
 
 
 @admin.post("/orders/<int:order_id>/retry")
@@ -306,7 +524,7 @@ def retry_order_route(order_id: int):
         or f"Delivery status: {outcome.response.get('delivery_status')}",
         "success" if outcome.status_code == 200 else "error",
     )
-    return redirect(url_for("admin.dashboard"))
+    return _order_action_redirect(order_id)
 
 
 @admin.post("/orders/<int:order_id>/reconcile")
@@ -326,7 +544,7 @@ def reconcile_order_route(order_id: int):
         or f"G2G status: {outcome.response.get('delivery_status')}",
         "success" if outcome.status_code == 200 else "error",
     )
-    return redirect(url_for("admin.dashboard"))
+    return _order_action_redirect(order_id)
 
 
 @admin.post("/orders/<int:order_id>/sessions/revoke")
@@ -342,7 +560,7 @@ def revoke_order_sessions_route(order_id: int):
     )
     db.session.commit()
     flash(f"Revoked {count} active session(s).", "success")
-    return redirect(url_for("admin.dashboard"))
+    return _order_action_redirect(order_id)
 
 
 @admin.post("/sessions/<int:session_id>/revoke")
@@ -358,6 +576,13 @@ def revoke_session_route(session_id: int):
     )
     db.session.commit()
     flash("Session revoked." if found else "Session not found.", "success")
+    if request.form.get("return_to") == "order":
+        try:
+            order_id = int(request.form.get("order_id", ""))
+        except ValueError:
+            order_id = 0
+        if order_id and db.session.get(Order, order_id) is not None:
+            return redirect(url_for("admin.order_detail", order_id=order_id))
     return redirect(url_for("admin.dashboard"))
 
 
@@ -386,7 +611,8 @@ def cleanup_route():
     db.session.commit()
     flash(
         f"Removed {result['access_attempts']} access attempts and "
-        f"{result['buyer_sessions']} expired sessions.",
+        f"{result['buyer_sessions']} expired sessions, plus "
+        f"{result['visitor_events']} visitor events.",
         "success",
     )
     return redirect(url_for("admin.dashboard"))

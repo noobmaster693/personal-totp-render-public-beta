@@ -1,0 +1,61 @@
+{% extends "admin/base.html" %}
+{% block title %}Public portal visitors{% endblock %}
+{% block content %}
+  <div class="admin-heading">
+    <div>
+      <p class="eyebrow">Public portal</p>
+      <h1>Visitor IP addresses</h1>
+    </div>
+    <a class="secondary-button button-link" href="{{ url_for('admin.dashboard') }}">Back to operations</a>
+  </div>
+
+  <p class="privacy-note">
+    {% if visitor_log_enabled %}
+      Logging is enabled for public <code>GET /</code> visits and records IP address, browser user agent, and time. Data shown here is limited to the configured {{ retention_days }}-day retention window.
+    {% else %}
+      Visitor logging is currently disabled. Existing records remain visible until cleanup.
+    {% endif %}
+  </p>
+
+  <section class="admin-panel">
+    <h2>Visitors by IP</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>IP address</th><th>Visits</th><th>First seen</th><th>Last seen</th></tr></thead>
+        <tbody>
+          {% for visitor in visitor_summary %}
+            <tr>
+              <td><strong>{{ visitor.ip_address }}</strong></td>
+              <td>{{ visitor.visit_count }}</td>
+              <td>{{ visitor.first_seen.isoformat() }}</td>
+              <td>{{ visitor.last_seen.isoformat() }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4">No public visits have been recorded in this retention window.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="admin-panel">
+    <h2>Recent visits</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Time</th><th>IP address</th><th>Path</th><th>Browser / client</th></tr></thead>
+        <tbody>
+          {% for visit in recent_visits %}
+            <tr>
+              <td>{{ visit.visited_at.isoformat() }}</td>
+              <td>{{ visit.ip_address }}</td>
+              <td>{{ visit.path }}</td>
+              <td><small title="{{ visit.user_agent }}">{{ visit.user_agent[:180] or "No user agent" }}</small></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4">No recent visits.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

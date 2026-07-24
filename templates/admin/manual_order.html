@@ -1,0 +1,48 @@
+{% extends "admin/base.html" %}
+{% block title %}Create manual access key{% endblock %}
+{% block content %}
+  {% set values = form or {} %}
+  <div class="admin-heading">
+    <div>
+      <p class="eyebrow">Manual access</p>
+      <h1>Create a new key</h1>
+    </div>
+    <a class="secondary-button button-link" href="{{ url_for('admin.dashboard') }}">Back to orders</a>
+  </div>
+
+  <section class="admin-form-card">
+    <p>Create access without a G2G order. The key will use the same hashing, expiry, session tracking, and revocation flow as automatically delivered keys.</p>
+    <form method="post">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="form-grid">
+        <div>
+          <label for="order-reference">Order reference (optional)</label>
+          <input id="order-reference" name="order_reference" maxlength="160" value="{{ values.get('order_reference', '') }}" placeholder="Generated automatically if blank">
+        </div>
+        <div>
+          <label for="buyer-username">Buyer username (optional)</label>
+          <input id="buyer-username" name="buyer_username" maxlength="160" value="{{ values.get('buyer_username', '') }}" placeholder="Marketplace or customer username">
+        </div>
+      </div>
+
+      <label for="product-name">Product name</label>
+      <input id="product-name" name="product_name" maxlength="240" required value="{{ values.get('product_name', '') }}" placeholder="Software access">
+
+      <div class="form-grid">
+        <div>
+          <label for="duration-value">Access duration</label>
+          <input id="duration-value" name="duration_value" type="number" min="1" max="87600" required value="{{ values.get('duration_value', '30') }}">
+        </div>
+        <div>
+          <label for="duration-unit">Duration unit</label>
+          <select id="duration-unit" name="duration_unit">
+            <option value="days" {% if values.get('duration_unit', 'days') == 'days' %}selected{% endif %}>Days</option>
+            <option value="hours" {% if values.get('duration_unit') == 'hours' %}selected{% endif %}>Hours</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="primary-button compact-button" type="submit">Create access key</button>
+    </form>
+  </section>
+{% endblock %}
