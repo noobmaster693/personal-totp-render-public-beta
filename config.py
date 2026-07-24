@@ -116,6 +116,7 @@ def build_config() -> dict[str, Any]:
         "ADMIN_USERNAME": os.getenv("ADMIN_USERNAME", ""),
         "ADMIN_PASSWORD_HASH": os.getenv("ADMIN_PASSWORD_HASH", ""),
         "ADMIN_TOTP_SECRET": os.getenv("ADMIN_TOTP_SECRET", ""),
+        "ADMIN_TOTP_REQUIRED": env_bool("ADMIN_TOTP_REQUIRED", True),
         "ADMIN_SESSION_HOURS": int(os.getenv("ADMIN_SESSION_HOURS", "4")),
         "ADMIN_LOGIN_ATTEMPTS": int(os.getenv("ADMIN_LOGIN_ATTEMPTS", "10")),
         "ADMIN_LOGIN_WINDOW_SECONDS": int(
@@ -201,8 +202,13 @@ def configuration_errors(config: dict[str, Any]) -> list[str]:
             errors.append("Production PUBLIC_BASE_URL must be HTTPS")
         if not config.get("SESSION_COOKIE_SECURE"):
             errors.append("Production requires SESSION_COOKIE_SECURE=true")
-        if not config.get("ADMIN_TOTP_SECRET"):
-            errors.append("Production requires a separate ADMIN_TOTP_SECRET")
+        if config.get("ADMIN_TOTP_REQUIRED", True) and not config.get(
+            "ADMIN_TOTP_SECRET"
+        ):
+            errors.append(
+                "Production requires a separate ADMIN_TOTP_SECRET when "
+                "ADMIN_TOTP_REQUIRED=true"
+            )
 
     if config.get("G2G_INTEGRATION_ENABLED"):
         g2g_required = {

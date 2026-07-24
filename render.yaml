@@ -36,6 +36,8 @@ services:
         sync: false
       - key: ADMIN_PASSWORD_HASH
         sync: false
+      - key: ADMIN_TOTP_REQUIRED
+        value: "false"
       - key: ADMIN_TOTP_SECRET
         sync: false
       - key: G2G_INTEGRATION_ENABLED
