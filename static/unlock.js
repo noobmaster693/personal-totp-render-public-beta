@@ -6,6 +6,6 @@ const languageInput = document.getElementById("language_hint");
 if (timezoneInput) {
   timezoneInput.value = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
 }
-if (languageInput) {
+if (languageInput && !languageInput.value) {
   languageInput.value = navigator.language || "";
 }

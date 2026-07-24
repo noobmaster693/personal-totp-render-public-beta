@@ -69,6 +69,65 @@
   </section>
 
   <section class="admin-panel">
+    <h2>Expiration controls</h2>
+    {% if order.status == "revoked" %}
+      <p class="security-note">
+        This order was revoked, cancelled, or refunded. Its expiration can no
+        longer be changed and it cannot be reactivated from this page.
+      </p>
+    {% else %}
+      <p class="panel-note">
+        Times entered here are UTC. Extending an expired order does not activate
+        it until you use Reactivate. Previously revoked buyer sessions are never
+        restored; the buyer unlocks a new session with the same access key.
+      </p>
+      <div class="control-grid">
+        <form class="control-form" method="post" action="{{ url_for('admin.update_order_expiration', order_id=order.id) }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="mode" value="set">
+          <h3>Set exact expiration</h3>
+          <label for="expires-at">Expiration date and time (UTC)</label>
+          <input id="expires-at" name="expires_at" type="datetime-local" value="{{ expires_at_input }}" step="1" required>
+          <button class="secondary-button" type="submit">Save expiration</button>
+        </form>
+
+        <form class="control-form" method="post" action="{{ url_for('admin.update_order_expiration', order_id=order.id) }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="mode" value="extend">
+          <h3>Extend access</h3>
+          <label for="duration-value">Add time after the later of now or the current expiration (maximum 10 years)</label>
+          <div class="control-inline">
+            <input id="duration-value" name="duration_value" type="number" min="1" value="1" required>
+            <select name="duration_unit" aria-label="Extension unit">
+              <option value="hours">Hours</option>
+              <option value="days" selected>Days</option>
+            </select>
+          </div>
+          <button class="secondary-button" type="submit">Extend expiration</button>
+        </form>
+
+        <div class="control-form">
+          <h3>Reactivate expired key</h3>
+          {% if order.status == "expired" %}
+            <p>
+              The existing access key will work again after reactivation.
+            </p>
+            <form method="post" action="{{ url_for('admin.reactivate_order', order_id=order.id) }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button class="secondary-button" type="submit" {% if not expires_in_future %}disabled{% endif %}>Reactivate order</button>
+            </form>
+            {% if not expires_in_future %}
+              <small>Extend the expiration into the future first.</small>
+            {% endif %}
+          {% else %}
+            <p>This order is already active.</p>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="admin-panel">
     <h2>IP addresses that used this key</h2>
     <p class="panel-note">These are IPs from successful key unlocks that created buyer sessions.</p>
     <div class="table-scroll">

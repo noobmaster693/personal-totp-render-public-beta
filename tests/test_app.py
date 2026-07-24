@@ -7,7 +7,8 @@ from pathlib import Path
 
 from app import create_app
 from extensions import db
-from models import BuyerSession
+from localization import ENGLISH, LANGUAGE_OPTIONS, TRANSLATION_OVERRIDES
+from models import BuyerSession, Order
 from services import create_manual_order
 from tests.helpers import app_config
 from totp import TOTPConfig, generate_totp, verify_totp
@@ -110,6 +111,108 @@ class PortalTests(unittest.TestCase):
         response = self.client.post("/unlock", data={"access_key": raw_key})
         self.assertEqual(response.status_code, 403)
         self.assertIn(b"expired", response.data.lower())
+
+    def test_language_is_auto_detected_and_can_be_changed(self):
+        response = self.client.get(
+            "/",
+            headers={"Accept-Language": "en;q=0.2, fr-FR;q=0.9"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'<html lang="fr" dir="ltr">', response.data)
+        self.assertIn(
+            "Saisissez votre clé d’accès".encode(),
+            response.data,
+        )
+        self.assertEqual(response.data.count(b"<option value="), len(LANGUAGE_OPTIONS))
+
+        response = self.client.post(
+            "/language",
+            data={"language": "ja"},
+            headers={"Accept-Language": "fr"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'<html lang="ja" dir="ltr">', response.data)
+        self.assertIn("アクセスキーを入力".encode(), response.data)
+        with self.client.session_transaction() as browser_session:
+            self.assertEqual(browser_session["buyer_language"], "ja")
+
+        self.assertEqual(
+            self.client.post(
+                "/language", data={"language": "not-supported"}
+            ).status_code,
+            400,
+        )
+
+    def test_chinese_variants_and_arabic_direction_are_supported(self):
+        traditional = self.app.test_client().get(
+            "/",
+            headers={"Accept-Language": "zh-Hant-HK,zh;q=0.8"},
+        )
+        self.assertIn(b'<html lang="zh-tw" dir="ltr">', traditional.data)
+        self.assertIn("請輸入存取金鑰".encode(), traditional.data)
+
+        simplified = self.app.test_client().get(
+            "/",
+            headers={"Accept-Language": "zh-Hans"},
+        )
+        self.assertIn(b'<html lang="zh-cn" dir="ltr">', simplified.data)
+        self.assertIn("请输入访问密钥".encode(), simplified.data)
+
+        arabic = self.app.test_client().get(
+            "/",
+            headers={"Accept-Language": "ar"},
+        )
+        self.assertIn(b'<html lang="ar" dir="rtl">', arabic.data)
+        self.assertIn("أدخل مفتاح الوصول".encode(), arabic.data)
+
+    def test_selected_language_persists_through_unlock_and_localizes_errors(self):
+        with self.app.app_context():
+            order, raw_key = create_manual_order(
+                order_id="LOCAL-LANGUAGE",
+                product_name="International access",
+                duration_seconds=3600,
+            )
+            order_id = order.id
+
+        self.client.post("/language", data={"language": "es"})
+        response = self.client.post(
+            "/unlock",
+            data={
+                "access_key": raw_key,
+                "language_hint": "es",
+            },
+            headers={"Accept-Language": "de"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'<html lang="es" dir="ltr">', response.data)
+        self.assertIn(b"Tu clave de compra ha sido aceptada", response.data)
+        with self.app.app_context():
+            buyer_session = db.session.scalar(
+                db.select(BuyerSession).where(BuyerSession.order_id == order_id)
+            )
+            self.assertEqual(buyer_session.language_hint, "es")
+
+        expired_client = self.app.test_client()
+        expired_client.post("/language", data={"language": "fr"})
+        with self.app.app_context():
+            order = db.session.get(Order, order_id)
+            order.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            db.session.commit()
+        response = expired_client.post(
+            "/unlock",
+            data={"access_key": raw_key},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("Cet abonnement a expiré".encode(), response.data)
+
+    def test_every_advertised_language_has_a_complete_catalog(self):
+        advertised = {code for code, _ in LANGUAGE_OPTIONS}
+        self.assertEqual(advertised, {"en", *TRANSLATION_OVERRIDES})
+        for language, translations in TRANSLATION_OVERRIDES.items():
+            with self.subTest(language=language):
+                self.assertEqual(set(translations), set(ENGLISH))
 
     def test_liveness_and_readiness_are_separate(self):
         live = self.client.get("/live")

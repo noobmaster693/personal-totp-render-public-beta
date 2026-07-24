@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from cryptography.fernet import InvalidToken
 from flask import (
     Flask,
+    abort,
     jsonify,
     redirect,
     render_template,
@@ -21,6 +22,14 @@ from admin import admin
 from config import build_config, configuration_errors
 from extensions import db
 from g2g import verify_webhook_signature
+from localization import (
+    LANGUAGE_OPTIONS,
+    direction_for,
+    resolve_language,
+    supported_language,
+    translate_portal_error,
+    translations_for,
+)
 from services import (
     active_buyer_session,
     create_buyer_session,
@@ -54,6 +63,27 @@ def create_app(test_config: dict | None = None) -> Flask:
     db.init_app(app)
     app.register_blueprint(admin)
     app.extensions["setup_errors"] = configuration_errors(app.config)
+
+    def buyer_language() -> str:
+        return resolve_language(
+            session.get("buyer_language"),
+            request.headers.get("Accept-Language", ""),
+        )
+
+    def buyer_template_context(account: AccountSettings, *, order=None) -> dict:
+        language = buyer_language()
+        return {
+            "order": order,
+            "label": account.totp.label,
+            "issuer": account.totp.issuer,
+            "period": account.totp.period,
+            "provider": account.provider,
+            "login_email": account.login_email,
+            "language": language,
+            "direction": direction_for(language),
+            "language_options": LANGUAGE_OPTIONS,
+            "t": translations_for(language),
+        }
 
     def account_or_errors() -> tuple[AccountSettings | None, list[str]]:
         errors = list(app.extensions["setup_errors"])
@@ -190,13 +220,17 @@ def create_app(test_config: dict | None = None) -> Flask:
 
         return render_template(
             "index.html",
-            order=order,
-            label=account.totp.label,
-            issuer=account.totp.issuer,
-            period=account.totp.period,
-            provider=account.provider,
-            login_email=account.login_email,
+            **buyer_template_context(account, order=order),
         )
+
+    @app.post("/language")
+    def set_language():
+        language = supported_language(request.form.get("language"))
+        if language is None:
+            abort(400, "Unsupported language")
+        session["buyer_language"] = language
+        session.permanent = True
+        return redirect(url_for("index"))
 
     @app.post("/unlock")
     def unlock():
@@ -205,19 +239,13 @@ def create_app(test_config: dict | None = None) -> Flask:
             return redirect(url_for("index"))
 
         raw_key = request.form.get("access_key", "").strip()
-        template_context = {
-            "order": None,
-            "label": account.totp.label,
-            "issuer": account.totp.issuer,
-            "period": account.totp.period,
-            "provider": account.provider,
-            "login_email": account.login_email,
-        }
+        template_context = buyer_template_context(account)
+        translations = template_context["t"]
         if not 10 <= len(raw_key) <= 200:
             return render_template(
                 "index.html",
                 **template_context,
-                error="Enter the complete access key supplied with your order.",
+                error=translations["complete_key_error"],
             ), 400
 
         try:
@@ -240,7 +268,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             return render_template(
                 "index.html",
                 **template_context,
-                error=str(exc),
+                error=translate_portal_error(str(exc), translations),
             ), 403
 
         session.pop("buyer_session_token", None)
@@ -255,18 +283,19 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     @app.get("/api/code")
     def code_api():
+        translations = translations_for(buyer_language())
         account, errors = account_or_errors()
         if errors or account is None:
-            return jsonify(error="The portal is not configured"), 503
+            return jsonify(error=translations["portal_not_configured"]), 503
 
         raw_session_token = session.get("buyer_session_token")
         if not isinstance(raw_session_token, str):
-            return jsonify(error="Enter your access key first"), 401
+            return jsonify(error=translations["enter_key_first"]), 401
 
         active = active_buyer_session(raw_session_token)
         if active is None:
             session.pop("buyer_session_token", None)
-            return jsonify(error="Your access has expired or was revoked"), 403
+            return jsonify(error=translations["access_ended"]), 403
         _, order = active
 
         code, remaining = generate_totp(account.totp)

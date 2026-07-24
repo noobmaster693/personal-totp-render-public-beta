@@ -37,8 +37,10 @@ from models import (
 )
 from security import decrypt_text, generate_csrf_token
 from services import (
+    as_utc,
     cleanup_operational_data,
     create_manual_order,
+    ensure_order_state,
     revoke_buyer_sessions,
     revoke_order,
     revoke_session,
@@ -136,6 +138,21 @@ def _order_action_redirect(order_id: int):
     if request.form.get("return_to") == "order":
         return redirect(url_for("admin.order_detail", order_id=order_id))
     return redirect(url_for("admin.dashboard"))
+
+
+def _locked_order(order_id: int) -> Order:
+    order = db.session.scalar(
+        select(Order).where(Order.id == order_id).with_for_update()
+    )
+    if order is None:
+        abort(404)
+    return order
+
+
+def _expiration_error(order_id: int, message: str):
+    db.session.rollback()
+    flash(message, "error")
+    return redirect(url_for("admin.order_detail", order_id=order_id))
 
 
 @admin.app_context_processor
@@ -388,6 +405,7 @@ def order_detail(order_id: int):
     order = db.session.get(Order, order_id)
     if order is None:
         abort(404)
+    ensure_order_state(order)
 
     now = datetime.now(timezone.utc)
     buyer_sessions = db.session.scalars(
@@ -441,6 +459,8 @@ def order_detail(order_id: int):
         "admin/order_detail.html",
         order=order,
         now=now,
+        expires_at_input=as_utc(order.expires_at).strftime("%Y-%m-%dT%H:%M:%S"),
+        expires_in_future=as_utc(order.expires_at) > now,
         buyer_sessions=buyer_sessions,
         access_attempts=access_attempts,
         delivery_attempts=delivery_attempts,
@@ -482,6 +502,158 @@ def reveal_order_key(order_id: int):
         order=order,
         raw_key=raw_key,
     )
+
+
+@admin.post("/orders/<int:order_id>/expiration")
+@admin_required
+def update_order_expiration(order_id: int):
+    _check_csrf()
+    order = _locked_order(order_id)
+    if order.status == "revoked":
+        return _expiration_error(
+            order_id,
+            "Revoked, cancelled, or refunded orders cannot be renewed.",
+        )
+
+    now = datetime.now(timezone.utc)
+    maximum_expiration = now + timedelta(days=3_650)
+    old_expiration = as_utc(order.expires_at)
+    revoked_sessions = 0
+    if order.status == "active" and old_expiration <= now:
+        order.status = "expired"
+        revoked_sessions = revoke_buyer_sessions(
+            order.id,
+            reason="order expired before administrator update",
+            commit=False,
+        )
+    mode = request.form.get("mode", "")
+    action = "order_expiration_updated"
+    details: dict[str, object] = {
+        "old_expiration": old_expiration.isoformat(),
+        "mode": mode,
+    }
+
+    if mode == "set":
+        raw_expiration = request.form.get("expires_at", "").strip()
+        try:
+            parsed = datetime.fromisoformat(raw_expiration.replace("Z", "+00:00"))
+            new_expiration = as_utc(parsed)
+        except (OverflowError, ValueError):
+            return _expiration_error(
+                order_id,
+                "Enter a valid expiration date and time.",
+            )
+        action = "order_expiration_set"
+    elif mode == "extend":
+        try:
+            duration_value = int(request.form.get("duration_value", ""))
+        except ValueError:
+            duration_value = 0
+        duration_unit = request.form.get("duration_unit", "")
+        maximum_value = 87_600 if duration_unit == "hours" else 3_650
+        if (
+            duration_unit not in {"hours", "days"}
+            or duration_value < 1
+            or duration_value > maximum_value
+        ):
+            return _expiration_error(
+                order_id,
+                "Enter 1–87,600 hours or 1–3,650 days.",
+            )
+        extension_base = max(old_expiration, now)
+        if extension_base >= maximum_expiration:
+            return _expiration_error(
+                order_id,
+                "The current expiration is already at or beyond the 10-year limit.",
+            )
+        new_expiration = extension_base + timedelta(**{duration_unit: duration_value})
+        action = "order_expiration_extended"
+        details.update(
+            {
+                "duration_value": duration_value,
+                "duration_unit": duration_unit,
+                "extension_base": extension_base.isoformat(),
+            }
+        )
+    else:
+        return _expiration_error(order_id, "Unknown expiration action.")
+
+    if new_expiration <= as_utc(order.purchased_at):
+        return _expiration_error(
+            order_id,
+            "Expiration must be later than the purchase date.",
+        )
+    if new_expiration > maximum_expiration:
+        return _expiration_error(
+            order_id,
+            "Expiration cannot be more than 10 years from today.",
+        )
+
+    if new_expiration <= now and order.status == "active":
+        order.status = "expired"
+        revoked_sessions = revoke_buyer_sessions(
+            order.id,
+            reason="order expiration changed by administrator",
+            commit=False,
+        )
+
+    order.expires_at = new_expiration
+    details.update(
+        {
+            "new_expiration": new_expiration.isoformat(),
+            "revoked_sessions": revoked_sessions,
+        }
+    )
+    audit(
+        action,
+        target_type="order",
+        target_id=str(order.id),
+        details=details,
+    )
+    db.session.commit()
+    flash(
+        f"Expiration updated to {new_expiration.isoformat()}.",
+        "success",
+    )
+    return redirect(url_for("admin.order_detail", order_id=order.id))
+
+
+@admin.post("/orders/<int:order_id>/reactivate")
+@admin_required
+def reactivate_order(order_id: int):
+    _check_csrf()
+    order = _locked_order(order_id)
+    if order.status != "expired":
+        return _expiration_error(
+            order_id,
+            "Only expired orders can be reactivated.",
+        )
+
+    expiration = as_utc(order.expires_at)
+    if expiration <= datetime.now(timezone.utc):
+        return _expiration_error(
+            order_id,
+            "Extend the expiration into the future before reactivating this key.",
+        )
+
+    order.status = "active"
+    order.revoked_at = None
+    audit(
+        "order_reactivated",
+        target_type="order",
+        target_id=str(order.id),
+        details={
+            "expiration": expiration.isoformat(),
+            "sessions_restored": 0,
+        },
+    )
+    db.session.commit()
+    flash(
+        "Order reactivated. The same access key works again; previously revoked "
+        "sessions remain revoked.",
+        "success",
+    )
+    return redirect(url_for("admin.order_detail", order_id=order.id))
 
 
 @admin.get("/visitors")

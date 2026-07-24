@@ -6,6 +6,19 @@ const progressBar = document.getElementById("progress-bar");
 const copyButton = document.getElementById("copy-code");
 const copyLabel = document.getElementById("copy-label");
 const statusMessage = document.getElementById("status-message");
+const messages = {
+  newCodeIn: document.body.dataset.newCodeIn || "New code in",
+  second: document.body.dataset.second || "second",
+  seconds: document.body.dataset.seconds || "seconds",
+  refreshing: document.body.dataset.refreshing || "Refreshing",
+  tapToCopy: document.body.dataset.tapToCopy || "Tap to copy",
+  unableToRetrieve:
+    document.body.dataset.unableToRetrieve || "Unable to retrieve the code.",
+  connectionError: document.body.dataset.connectionError || "Connection error.",
+  copied: document.body.dataset.copied || "Copied",
+  copyFailed:
+    document.body.dataset.copyFailed || "Copy failed. Select the code manually.",
+};
 
 let currentCode = "";
 let currentRemaining = 0;
@@ -25,14 +38,13 @@ function renderCountdown() {
   const remaining = Math.max(0, currentRemaining - elapsed);
   const ratio = Math.max(0, Math.min(1, remaining / currentPeriod));
   progressBar.style.width = `${ratio * 100}%`;
-  countdownElement.textContent = remaining === 1
-    ? "New code in 1 second"
-    : `New code in ${remaining} seconds`;
+  const unit = remaining === 1 ? messages.second : messages.seconds;
+  countdownElement.textContent = `${messages.newCodeIn} ${remaining} ${unit}`;
 
   if (remaining <= 0) {
     currentCode = "";
     codeElement.textContent = "••• •••";
-    copyLabel.textContent = "Refreshing";
+    copyLabel.textContent = messages.refreshing;
     fetchCode();
     return;
   }
@@ -55,18 +67,20 @@ async function fetchCode() {
       window.location.assign("/");
       return;
     }
-    if (!response.ok) throw new Error(data.error || "Unable to retrieve the code.");
+    if (!response.ok) {
+      throw new Error(data.error || messages.unableToRetrieve);
+    }
 
     currentCode = String(data.code || "");
     currentRemaining = Number(data.remaining || 0);
     currentPeriod = Number(data.period || 30);
     lastFetchAt = Date.now();
     codeElement.textContent = formatCode(currentCode);
-    copyLabel.textContent = "Tap to copy";
+    copyLabel.textContent = messages.tapToCopy;
     statusMessage.textContent = "";
     renderCountdown();
   } catch (error) {
-    statusMessage.textContent = error.message || "Connection error.";
+    statusMessage.textContent = error.message || messages.connectionError;
   } finally {
     fetchInFlight = false;
   }
@@ -76,12 +90,12 @@ copyButton?.addEventListener("click", async () => {
   if (!currentCode) return;
   try {
     await navigator.clipboard.writeText(currentCode);
-    copyLabel.textContent = "Copied";
+    copyLabel.textContent = messages.copied;
     window.setTimeout(() => {
-      copyLabel.textContent = "Tap to copy";
+      copyLabel.textContent = messages.tapToCopy;
     }, 1400);
   } catch {
-    statusMessage.textContent = "Copy failed. Select the code manually.";
+    statusMessage.textContent = messages.copyFailed;
   }
 });
 
