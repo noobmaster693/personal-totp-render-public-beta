@@ -145,11 +145,18 @@ def inject_admin_helpers():
 
 @admin.route("/login", methods=["GET", "POST"])
 def login():
+    admin_totp_required = bool(current_app.config["ADMIN_TOTP_REQUIRED"])
     if request.method == "POST":
         _check_csrf()
         if _login_rate_limited():
             flash("Too many failed login attempts. Try again later.", "error")
-            return render_template("admin/login.html"), 429
+            return (
+                render_template(
+                    "admin/login.html",
+                    admin_totp_required=admin_totp_required,
+                ),
+                429,
+            )
 
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
@@ -164,21 +171,33 @@ def login():
         )
 
         admin_totp_secret = current_app.config.get("ADMIN_TOTP_SECRET", "")
-        if valid and admin_totp_secret:
-            try:
-                config = parse_totp_config(
-                    admin_totp_secret, "Portal admin", "TOTP Portal"
+        if valid and admin_totp_required:
+            if not admin_totp_secret:
+                current_app.logger.error(
+                    "ADMIN_TOTP_REQUIRED is true but ADMIN_TOTP_SECRET is missing"
                 )
-                valid = verify_totp(config, totp_code, window=1)
-            except ValueError:
-                current_app.logger.error("ADMIN_TOTP_SECRET is invalid")
                 valid = False
+            else:
+                try:
+                    config = parse_totp_config(
+                        admin_totp_secret, "Portal admin", "TOTP Portal"
+                    )
+                    valid = verify_totp(config, totp_code, window=1)
+                except ValueError:
+                    current_app.logger.error("ADMIN_TOTP_SECRET is invalid")
+                    valid = False
 
         if not valid:
             audit("login_failed", actor=username or "unknown")
             db.session.commit()
             flash("Invalid administrator credentials.", "error")
-            return render_template("admin/login.html"), 403
+            return (
+                render_template(
+                    "admin/login.html",
+                    admin_totp_required=admin_totp_required,
+                ),
+                403,
+            )
 
         session["admin_user"] = username
         session["admin_authenticated_at"] = int(time.time())
@@ -191,7 +210,10 @@ def login():
             next_url = url_for("admin.dashboard")
         return redirect(next_url)
 
-    return render_template("admin/login.html")
+    return render_template(
+        "admin/login.html",
+        admin_totp_required=admin_totp_required,
+    )
 
 
 @admin.post("/logout")

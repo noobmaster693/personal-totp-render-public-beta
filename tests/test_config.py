@@ -19,6 +19,7 @@ def production_config() -> dict:
         "ADMIN_USERNAME": "admin",
         "ADMIN_PASSWORD_HASH": "hash",
         "ADMIN_TOTP_SECRET": "JBSWY3DPEHPK3PXP",
+        "ADMIN_TOTP_REQUIRED": True,
         "G2G_INTEGRATION_ENABLED": False,
     }
 
@@ -42,6 +43,12 @@ class ProductionConfigurationTests(unittest.TestCase):
 
     def test_valid_production_baseline_passes(self):
         self.assertEqual(configuration_errors(production_config()), [])
+
+    def test_production_can_explicitly_disable_admin_totp(self):
+        config = production_config()
+        config["ADMIN_TOTP_REQUIRED"] = False
+        config["ADMIN_TOTP_SECRET"] = ""
+        self.assertEqual(configuration_errors(config), [])
 
 
 if __name__ == "__main__":
