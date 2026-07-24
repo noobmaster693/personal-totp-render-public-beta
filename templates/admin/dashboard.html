@@ -1,0 +1,162 @@
+{% extends "admin/base.html" %}
+{% block title %}Portal operations{% endblock %}
+{% block content %}
+  <div class="admin-heading">
+    <div>
+      <p class="eyebrow">Operations</p>
+      <h1>Shared-account access</h1>
+    </div>
+    <div class="admin-actions">
+      <form method="post" action="{{ url_for('admin.retry_due_route') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button class="secondary-button" type="submit">Retry due deliveries</button>
+      </form>
+      <form method="post" action="{{ url_for('admin.cleanup_route') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="days" value="90">
+        <button class="secondary-button" type="submit">Clean data older than 90 days</button>
+      </form>
+    </div>
+  </div>
+
+  <section class="metric-grid" aria-label="Current status">
+    <article><span>Active orders</span><strong>{{ counts.active_orders }}</strong></article>
+    <article><span>Failed deliveries</span><strong>{{ counts.failed_deliveries }}</strong></article>
+    <article><span>Active sessions</span><strong>{{ counts.active_sessions }}</strong></article>
+    <article><span>Webhook conflicts</span><strong>{{ counts.webhook_conflicts }}</strong></article>
+  </section>
+
+  <section class="admin-panel">
+    <h2>Orders</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Order</th><th>Buyer / offer</th><th>Access</th><th>Delivery</th><th>Expires</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+          {% for order in orders %}
+            <tr>
+              <td><strong>{{ order.g2g_order_id }}</strong><br><small>#{{ order.id }}</small></td>
+              <td>{{ order.buyer_id or "unknown" }}<br><small>{{ order.offer_id }} · qty {{ order.quantity }}</small></td>
+              <td><span class="status {{ order.status }}">{{ order.status }}</span></td>
+              <td><span class="status {{ order.delivery_status }}">{{ order.delivery_status }}</span><br><small>{{ order.delivery_attempts }} attempt(s)</small>{% if order.last_error %}<details><summary>Last error</summary><p>{{ order.last_error }}</p></details>{% endif %}</td>
+              <td>{{ order.expires_at.isoformat() }}</td>
+              <td>
+                <div class="row-actions">
+                  <form method="post" action="{{ url_for('admin.retry_order_route', order_id=order.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit">Retry</button>
+                  </form>
+                  <form method="post" action="{{ url_for('admin.reconcile_order_route', order_id=order.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit">Reconcile</button>
+                  </form>
+                  <form method="post" action="{{ url_for('admin.revoke_order_sessions_route', order_id=order.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit">Revoke sessions</button>
+                  </form>
+                  {% if order.status == "active" %}
+                    <form method="post" action="{{ url_for('admin.revoke_order_route', order_id=order.id) }}">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                      <button class="danger-button" type="submit">Revoke order</button>
+                    </form>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6">No orders have been recorded.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="admin-panel">
+    <h2>Buyer sessions</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Session</th><th>Order</th><th>IP / client</th><th>Hints</th><th>Last seen</th><th>Action</th></tr></thead>
+        <tbody>
+          {% for buyer_session in buyer_sessions %}
+            <tr>
+              <td>#{{ buyer_session.id }}<br><span class="status {{ 'revoked' if buyer_session.revoked_at else 'active' }}">{{ "revoked" if buyer_session.revoked_at else "active" }}</span></td>
+              <td>#{{ buyer_session.order_id }}</td>
+              <td>{{ buyer_session.ip_address }}<br><small title="{{ buyer_session.user_agent }}">{{ buyer_session.user_agent[:90] }}</small></td>
+              <td>{{ buyer_session.timezone_hint or "—" }}<br><small>{{ buyer_session.language_hint or "—" }}</small></td>
+              <td>{{ buyer_session.last_seen_at.isoformat() }}</td>
+              <td>
+                {% if not buyer_session.revoked_at %}
+                  <form method="post" action="{{ url_for('admin.revoke_session_route', session_id=buyer_session.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <button class="danger-button" type="submit">Revoke</button>
+                  </form>
+                {% else %}
+                  <small>{{ buyer_session.revoke_reason or "revoked" }}</small>
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6">No buyer sessions.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="admin-panel">
+    <h2>Webhook event ledger</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Event</th><th>Type</th><th>Order</th><th>Status</th><th>Attempts</th><th>Received</th></tr></thead>
+        <tbody>
+          {% for event in events %}
+            <tr>
+              <td title="{{ event.event_id }}">{{ event.event_id[:32] }}</td>
+              <td>{{ event.event_type }}</td>
+              <td>{{ event.g2g_order_id or "—" }}</td>
+              <td><span class="status {{ event.status }}">{{ event.status }}</span>{% if event.last_error %}<br><small>{{ event.last_error }}</small>{% endif %}</td>
+              <td>{{ event.attempts }}</td>
+              <td>{{ event.received_at.isoformat() }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6">No webhook events.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="admin-panel split-panels">
+    <div>
+      <h2>Delivery attempts</h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Order</th><th>Attempt</th><th>Status</th><th>HTTP</th><th>Started</th></tr></thead>
+          <tbody>
+            {% for attempt in attempts %}
+              <tr><td>#{{ attempt.order_id }}</td><td>{{ attempt.attempt_number }}</td><td>{{ attempt.status }}{% if attempt.error %}<br><small>{{ attempt.error }}</small>{% endif %}</td><td>{{ attempt.http_status or "—" }}</td><td>{{ attempt.started_at.isoformat() }}</td></tr>
+            {% else %}
+              <tr><td colspan="5">No delivery attempts.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div>
+      <h2>Cancellation/refund tombstones</h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Order</th><th>Reason</th><th>Event time</th></tr></thead>
+          <tbody>
+            {% for tombstone in tombstones %}
+              <tr><td>{{ tombstone.g2g_order_id }}</td><td>{{ tombstone.reason }}</td><td>{{ tombstone.event_happened_at.isoformat() }}</td></tr>
+            {% else %}
+              <tr><td colspan="3">No tombstones.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+{% endblock %}

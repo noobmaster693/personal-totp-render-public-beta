@@ -1,0 +1,22 @@
+{
+  "id": "45252cb8-5f79-4b31-a0d8-761760bd3e57-1",
+  "event_happened_at": 1671693034000,
+  "event_type": "order.api_delivery",
+  "payload": {
+    "order_id": "1670568841157TEST-1",
+    "buyer_id": "684896",
+    "seller_id": "685064",
+    "offer_id": "G16704985465TEST",
+    "purchased_qty": 1,
+    "defected_qty": 0,
+    "delivered_qty": 0,
+    "refunded_qty": 0,
+    "delivery_method_list": [
+      {
+        "delivery_method_id": "api_delivery",
+        "delivery_method_name": "API delivery"
+      }
+    ],
+    "additional_info_list": []
+  }
+}

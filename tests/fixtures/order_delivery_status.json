@@ -1,0 +1,10 @@
+{
+  "id": "b7bda00d-bb2c-4911-8212-f9b25ff6636a",
+  "event_happened_at": 1671693044000,
+  "event_type": "order.delivery_status",
+  "payload": {
+    "order_id": "1670568841157TEST-1",
+    "delivery_id": "D1671612731000",
+    "delivery_status": "delivered"
+  }
+}

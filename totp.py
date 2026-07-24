@@ -92,9 +92,7 @@ def parse_totp_config(
     )
 
 
-def generate_totp(
-    config: TOTPConfig, timestamp: int | None = None
-) -> tuple[str, int]:
+def generate_totp(config: TOTPConfig, timestamp: int | None = None) -> tuple[str, int]:
     now = int(time.time()) if timestamp is None else int(timestamp)
     counter = now // config.period
     key = decode_base32(config.secret)
@@ -109,3 +107,21 @@ def generate_totp(
     code = str(binary % (10**config.digits)).zfill(config.digits)
     remaining = config.period - (now % config.period)
     return code, remaining
+
+
+def verify_totp(
+    config: TOTPConfig,
+    candidate: str,
+    timestamp: int | None = None,
+    window: int = 1,
+) -> bool:
+    normalized = "".join(candidate.split())
+    if not normalized.isdigit() or len(normalized) != config.digits:
+        return False
+
+    now = int(time.time()) if timestamp is None else int(timestamp)
+    for offset in range(-window, window + 1):
+        expected, _ = generate_totp(config, now + offset * config.period)
+        if hmac.compare_digest(expected, normalized):
+            return True
+    return False

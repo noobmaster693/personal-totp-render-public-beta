@@ -4,11 +4,19 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from flask import current_app
-from sqlalchemy import func, select
+from sqlalchemy import distinct, func, select
 
 from extensions import db
-from models import AccessAttempt, Order
-from security import decrypt_text, encrypt_text, generate_access_key, hash_access_key
+from models import AccessAttempt, BuyerSession, Order
+from security import (
+    decrypt_text,
+    encrypt_text,
+    generate_access_key,
+    generate_session_token,
+    hash_access_key,
+    hash_session_token,
+)
+from settings_service import get_account_settings
 
 
 class UnknownOfferError(RuntimeError):
@@ -81,25 +89,23 @@ def is_rate_limited(ip_address: str) -> bool:
     return int(count or 0) >= maximum
 
 
-def ensure_order_state(order: Order) -> bool:
+def ensure_order_state(order: Order, *, commit: bool = True) -> bool:
     now = datetime.now(timezone.utc)
     expires_at = as_utc(order.expires_at)
     if order.status == "active" and now >= expires_at:
         order.status = "expired"
-        db.session.commit()
+        revoke_buyer_sessions(order.id, reason="order expired", commit=False)
+        if commit:
+            db.session.commit()
     return order.status == "active" and now < expires_at
 
 
-def verify_buyer_key(
-    raw_key: str, *, ip_address: str, user_agent: str
-) -> Order:
+def verify_buyer_key(raw_key: str, *, ip_address: str, user_agent: str) -> Order:
     if is_rate_limited(ip_address):
         raise PermissionError("Too many failed attempts. Wait a few minutes.")
 
     key_hash = hash_access_key(raw_key)
-    order = db.session.scalar(
-        select(Order).where(Order.access_key_hash == key_hash)
-    )
+    order = db.session.scalar(select(Order).where(Order.access_key_hash == key_hash))
 
     if order is None:
         log_attempt(
@@ -140,16 +146,107 @@ def verify_buyer_key(
     return order
 
 
-def active_order(order_id: int) -> Order | None:
-    order = db.session.get(Order, order_id)
-    if order is None:
+def _active_session_filter(now: datetime):
+    return (
+        BuyerSession.revoked_at.is_(None),
+        BuyerSession.expires_at > now,
+    )
+
+
+def create_buyer_session(
+    order: Order,
+    *,
+    ip_address: str,
+    user_agent: str,
+    timezone_hint: str = "",
+    language_hint: str = "",
+) -> tuple[BuyerSession, str]:
+    now = datetime.now(timezone.utc)
+    max_sessions = int(current_app.config.get("MAX_ACTIVE_SESSIONS_PER_ORDER", 0))
+    max_ips = int(current_app.config.get("MAX_DISTINCT_IPS_PER_ORDER", 0))
+
+    if max_sessions:
+        active_count = db.session.scalar(
+            select(func.count(BuyerSession.id)).where(
+                BuyerSession.order_id == order.id,
+                *_active_session_filter(now),
+            )
+        )
+        if int(active_count or 0) >= max_sessions:
+            raise PermissionError("This order has reached its active-session limit.")
+
+    if max_ips:
+        active_ips = db.session.scalar(
+            select(func.count(distinct(BuyerSession.ip_address))).where(
+                BuyerSession.order_id == order.id,
+                *_active_session_filter(now),
+            )
+        )
+        existing_ip = db.session.scalar(
+            select(BuyerSession.id).where(
+                BuyerSession.order_id == order.id,
+                BuyerSession.ip_address == ip_address,
+                *_active_session_filter(now),
+            )
+        )
+        if int(active_ips or 0) >= max_ips and existing_ip is None:
+            raise PermissionError("This order has reached its distinct-IP limit.")
+
+    raw_token = generate_session_token()
+    lifetime = current_app.permanent_session_lifetime
+    expires_at = min(as_utc(order.expires_at), now + lifetime)
+    buyer_session = BuyerSession(
+        token_hash=hash_session_token(raw_token),
+        order_id=order.id,
+        ip_address=ip_address[:80],
+        user_agent=user_agent[:1000],
+        timezone_hint=timezone_hint[:120] or None,
+        language_hint=language_hint[:120] or None,
+        expires_at=expires_at,
+    )
+    db.session.add(buyer_session)
+    db.session.commit()
+    return buyer_session, raw_token
+
+
+def active_buyer_session(raw_token: str) -> tuple[BuyerSession, Order] | None:
+    if not raw_token:
         return None
-    if not ensure_order_state(order):
+    buyer_session = db.session.scalar(
+        select(BuyerSession).where(
+            BuyerSession.token_hash == hash_session_token(raw_token)
+        )
+    )
+    if buyer_session is None or buyer_session.revoked_at is not None:
+        return None
+
+    now = datetime.now(timezone.utc)
+    if now >= as_utc(buyer_session.expires_at):
+        buyer_session.revoked_at = now
+        buyer_session.revoke_reason = "session expired"
+        db.session.commit()
+        return None
+
+    order = db.session.get(Order, buyer_session.order_id)
+    if order is None or not ensure_order_state(order):
+        return None
+
+    if now - as_utc(buyer_session.last_seen_at) >= timedelta(seconds=30):
+        buyer_session.last_seen_at = now
+        db.session.commit()
+    return buyer_session, order
+
+
+def active_order(order_id: int) -> Order | None:
+    """Compatibility helper used by management commands and older callers."""
+
+    order = db.session.get(Order, order_id)
+    if order is None or not ensure_order_state(order):
         return None
     return order
 
 
-def create_or_get_g2g_order(
+def create_g2g_order(
     *,
     g2g_order_id: str,
     delivery_id: str | None,
@@ -157,13 +254,9 @@ def create_or_get_g2g_order(
     buyer_id: str | None,
     quantity: int,
     purchased_at: datetime,
-) -> tuple[Order, str, bool]:
-    existing = db.session.scalar(
-        select(Order).where(Order.g2g_order_id == g2g_order_id)
-    )
-    if existing:
-        return existing, decrypt_text(existing.access_key_ciphertext), False
-
+    source_payload_digest: str,
+    event_id: str,
+) -> tuple[Order, str]:
     catalog = current_app.config["G2G_PRODUCTS"]
     product = catalog.get(str(offer_id))
     if not product:
@@ -178,10 +271,7 @@ def create_or_get_g2g_order(
 
     raw_key = generate_access_key()
     purchased_at = as_utc(purchased_at)
-    expires_at = purchased_at + timedelta(
-        seconds=int(product["duration_seconds"])
-    )
-
+    expires_at = purchased_at + timedelta(seconds=int(product["duration_seconds"]))
     order = Order(
         g2g_order_id=g2g_order_id,
         g2g_delivery_id=delivery_id,
@@ -195,8 +285,41 @@ def create_or_get_g2g_order(
         delivery_status="pending",
         access_key_hash=hash_access_key(raw_key),
         access_key_ciphertext=encrypt_text(raw_key),
+        source_payload_digest=source_payload_digest,
+        last_event_id=event_id,
+        next_delivery_attempt_at=datetime.now(timezone.utc),
     )
     db.session.add(order)
+    db.session.flush()
+    return order, raw_key
+
+
+def create_or_get_g2g_order(
+    *,
+    g2g_order_id: str,
+    delivery_id: str | None,
+    offer_id: str,
+    buyer_id: str | None,
+    quantity: int,
+    purchased_at: datetime,
+    source_payload_digest: str = "",
+    event_id: str = "",
+) -> tuple[Order, str, bool]:
+    existing = db.session.scalar(
+        select(Order).where(Order.g2g_order_id == g2g_order_id)
+    )
+    if existing:
+        return existing, decrypt_text(existing.access_key_ciphertext), False
+    order, raw_key = create_g2g_order(
+        g2g_order_id=g2g_order_id,
+        delivery_id=delivery_id,
+        offer_id=offer_id,
+        buyer_id=buyer_id,
+        quantity=quantity,
+        purchased_at=purchased_at,
+        source_payload_digest=source_payload_digest,
+        event_id=event_id,
+    )
     db.session.commit()
     return order, raw_key, True
 
@@ -207,9 +330,7 @@ def create_manual_order(
     product_name: str,
     duration_seconds: int,
 ) -> tuple[Order, str]:
-    existing = db.session.scalar(
-        select(Order).where(Order.g2g_order_id == order_id)
-    )
+    existing = db.session.scalar(select(Order).where(Order.g2g_order_id == order_id))
     if existing:
         return existing, decrypt_text(existing.access_key_ciphertext)
 
@@ -235,14 +356,12 @@ def create_manual_order(
 
 
 def delivery_text(order: Order, raw_key: str) -> str:
-    provider = current_app.config["SOFTWARE_PROVIDER"]
-    email = current_app.config["SOFTWARE_LOGIN_EMAIL"]
-    password = current_app.config["SOFTWARE_LOGIN_PASSWORD"]
+    account = get_account_settings()
     portal = current_app.config["PUBLIC_BASE_URL"]
     return (
-        f"Software account provider: {provider}\n"
-        f"Login email: {email}\n"
-        f"Password: {password}\n\n"
+        f"Software account provider: {account.provider}\n"
+        f"Login email: {account.login_email}\n"
+        f"Password: {account.login_password}\n\n"
         f"2FA portal: {portal}\n"
         f"Temporary access key: {raw_key}\n\n"
         f"Product: {order.product_name}\n"
@@ -254,14 +373,42 @@ def delivery_text(order: Order, raw_key: str) -> str:
     )
 
 
-def revoke_order(g2g_order_id: str, reason: str = "") -> bool:
-    order = db.session.scalar(
-        select(Order).where(Order.g2g_order_id == g2g_order_id)
-    )
+def revoke_buyer_sessions(order_id: int, *, reason: str, commit: bool = True) -> int:
+    now = datetime.now(timezone.utc)
+    sessions = db.session.scalars(
+        select(BuyerSession).where(
+            BuyerSession.order_id == order_id,
+            BuyerSession.revoked_at.is_(None),
+        )
+    ).all()
+    for buyer_session in sessions:
+        buyer_session.revoked_at = now
+        buyer_session.revoke_reason = reason[:240]
+    if commit:
+        db.session.commit()
+    return len(sessions)
+
+
+def revoke_order(g2g_order_id: str, reason: str = "", *, commit: bool = True) -> bool:
+    order = db.session.scalar(select(Order).where(Order.g2g_order_id == g2g_order_id))
     if order is None:
         return False
+    now = datetime.now(timezone.utc)
     order.status = "revoked"
+    order.revoked_at = now
     order.last_error = reason[:2000] or order.last_error
+    revoke_buyer_sessions(order.id, reason=reason or "order revoked", commit=False)
+    if commit:
+        db.session.commit()
+    return True
+
+
+def revoke_session(session_id: int, *, reason: str) -> bool:
+    buyer_session = db.session.get(BuyerSession, session_id)
+    if buyer_session is None:
+        return False
+    buyer_session.revoked_at = datetime.now(timezone.utc)
+    buyer_session.revoke_reason = reason[:240]
     db.session.commit()
     return True
 
@@ -276,5 +423,22 @@ def expire_due_orders() -> int:
     ).all()
     for order in orders:
         order.status = "expired"
+        revoke_buyer_sessions(order.id, reason="order expired", commit=False)
     db.session.commit()
     return len(orders)
+
+
+def cleanup_operational_data(*, older_than_days: int = 90) -> dict[str, int]:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+    attempts = (
+        db.session.query(AccessAttempt)
+        .filter(AccessAttempt.created_at < cutoff)
+        .delete(synchronize_session=False)
+    )
+    sessions = (
+        db.session.query(BuyerSession)
+        .filter(BuyerSession.expires_at < cutoff)
+        .delete(synchronize_session=False)
+    )
+    db.session.commit()
+    return {"access_attempts": attempts, "buyer_sessions": sessions}

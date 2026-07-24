@@ -29,6 +29,13 @@ function renderCountdown() {
     ? "New code in 1 second"
     : `New code in ${remaining} seconds`;
 
+  if (remaining <= 0) {
+    currentCode = "";
+    codeElement.textContent = "••• •••";
+    copyLabel.textContent = "Refreshing";
+    fetchCode();
+    return;
+  }
   if (remaining <= 1) fetchCode();
 }
 
@@ -55,6 +62,7 @@ async function fetchCode() {
     currentPeriod = Number(data.period || 30);
     lastFetchAt = Date.now();
     codeElement.textContent = formatCode(currentCode);
+    copyLabel.textContent = "Tap to copy";
     statusMessage.textContent = "";
     renderCountdown();
   } catch (error) {

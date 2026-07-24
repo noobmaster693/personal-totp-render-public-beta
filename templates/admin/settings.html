@@ -1,0 +1,39 @@
+{% extends "admin/base.html" %}
+{% block title %}Encrypted account settings{% endblock %}
+{% block content %}
+  <section class="admin-form-card">
+    <p class="eyebrow">Encrypted configuration</p>
+    <h1>Shared software account</h1>
+    <p>Email, password, provider and TOTP credentials saved here are encrypted with <code>DATA_ENCRYPTION_KEY</code>. Leave either secret field empty to keep its current value.</p>
+    <form method="post" autocomplete="off">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="form-grid">
+        <div>
+          <label for="provider">Provider</label>
+          <input id="provider" name="provider" value="{{ account.provider if account else '' }}" required>
+        </div>
+        <div>
+          <label for="login_email">Software login email</label>
+          <input id="login_email" name="login_email" type="email" value="{{ account.login_email if account else '' }}" required>
+        </div>
+        <div>
+          <label for="login_password">New software password</label>
+          <input id="login_password" name="login_password" type="password" autocomplete="new-password" placeholder="{{ 'Configured — leave blank to retain' if account else 'Required' }}">
+        </div>
+        <div>
+          <label for="totp_secret">New TOTP Base32 secret or otpauth URI</label>
+          <input id="totp_secret" name="totp_secret" type="password" autocomplete="off" placeholder="{{ 'Configured — leave blank to retain' if account else 'Required' }}">
+        </div>
+        <div>
+          <label for="totp_label">TOTP label</label>
+          <input id="totp_label" name="totp_label" value="{{ account.totp.label if account else 'Software Account' }}" required>
+        </div>
+        <div>
+          <label for="totp_issuer">TOTP issuer</label>
+          <input id="totp_issuer" name="totp_issuer" value="{{ account.totp.issuer if account else 'Software' }}" required>
+        </div>
+      </div>
+      <button class="primary-button compact-button" type="submit">Save encrypted settings</button>
+    </form>
+  </section>
+{% endblock %}

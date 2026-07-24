@@ -1,0 +1,124 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from app import create_app
+from extensions import db
+from models import BuyerSession, PortalSettings
+from services import create_manual_order
+from tests.helpers import (
+    ADMIN_PASSWORD,
+    ADMIN_TOTP_SECRET,
+    app_config,
+)
+from totp import generate_totp, parse_totp_config
+
+
+class AdminPortalTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        database_path = Path(self.temp_dir.name) / "admin.db"
+        self.app = create_app(app_config(f"sqlite:///{database_path}"))
+        self.client = self.app.test_client()
+        with self.app.app_context():
+            db.create_all()
+
+    def tearDown(self):
+        with self.app.app_context():
+            db.session.remove()
+            db.drop_all()
+        self.temp_dir.cleanup()
+
+    def csrf(self) -> str:
+        with self.client.session_transaction() as browser_session:
+            return browser_session["_csrf_token"]
+
+    def login(self):
+        response = self.client.get("/admin/login")
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            config = parse_totp_config(ADMIN_TOTP_SECRET, "Portal admin", "TOTP Portal")
+            code, _ = generate_totp(config)
+        response = self.client.post(
+            "/admin/login",
+            data={
+                "_csrf_token": self.csrf(),
+                "username": "admin",
+                "password": ADMIN_PASSWORD,
+                "totp_code": code,
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Shared-account access", response.data)
+
+    def test_admin_requires_authentication_and_csrf(self):
+        response = self.client.get("/admin/")
+        self.assertEqual(response.status_code, 302)
+        self.client.get("/admin/login")
+        response = self.client.post(
+            "/admin/login",
+            data={
+                "_csrf_token": "wrong",
+                "username": "admin",
+                "password": ADMIN_PASSWORD,
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_encrypted_account_settings_can_be_updated(self):
+        self.login()
+        response = self.client.post(
+            "/admin/settings",
+            data={
+                "_csrf_token": self.csrf(),
+                "provider": "Owned Software",
+                "login_email": "shared@example.test",
+                "login_password": "new-shared-password",
+                "totp_secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+                "totp_label": "Production shared account",
+                "totp_issuer": "Owned Software",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Encrypted account settings updated", response.data)
+
+        with self.app.app_context():
+            settings = db.session.get(PortalSettings, 1)
+            self.assertIsNotNone(settings)
+            self.assertNotIn("shared@example.test", settings.login_email_ciphertext)
+            self.assertNotIn("new-shared-password", settings.login_password_ciphertext)
+            self.assertNotIn("GEZDGNBVGY3TQOJQ", settings.totp_secret_ciphertext)
+
+    def test_admin_can_revoke_an_individual_buyer_session(self):
+        with self.app.app_context():
+            _, raw_key = create_manual_order(
+                order_id="ADMIN-SESSION-1",
+                product_name="Admin session test",
+                duration_seconds=3600,
+            )
+        buyer = self.app.test_client()
+        response = buyer.post("/unlock", data={"access_key": raw_key})
+        self.assertEqual(response.status_code, 302)
+        with self.app.app_context():
+            buyer_session = db.session.scalar(db.select(BuyerSession))
+            buyer_session_id = buyer_session.id
+
+        self.login()
+        response = self.client.post(
+            f"/admin/sessions/{buyer_session_id}/revoke",
+            data={"_csrf_token": self.csrf()},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            buyer_session = db.session.get(BuyerSession, buyer_session_id)
+            self.assertIsNotNone(buyer_session.revoked_at)
+        self.assertEqual(buyer.get("/api/code").status_code, 403)
+
+
+if __name__ == "__main__":
+    unittest.main()
