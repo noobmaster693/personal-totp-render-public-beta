@@ -1,0 +1,179 @@
+{% extends "admin/base.html" %}
+{% block title %}Order {{ order.g2g_order_id }}{% endblock %}
+{% block content %}
+  <div class="admin-heading">
+    <div>
+      <p class="eyebrow">{{ "Manual access" if order.offer_id == "MANUAL" else "G2G order" }}</p>
+      <h1>{{ order.g2g_order_id }}</h1>
+    </div>
+    <div class="admin-actions">
+      <a class="secondary-button button-link" href="{{ url_for('admin.dashboard') }}">Back to orders</a>
+      {% if order.offer_id != "MANUAL" %}
+        <form method="post" action="{{ url_for('admin.retry_order_route', order_id=order.id) }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="return_to" value="order">
+          <button class="secondary-button" type="submit">Retry delivery</button>
+        </form>
+        <form method="post" action="{{ url_for('admin.reconcile_order_route', order_id=order.id) }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="return_to" value="order">
+          <button class="secondary-button" type="submit">Reconcile</button>
+        </form>
+      {% endif %}
+      <form method="post" action="{{ url_for('admin.revoke_order_sessions_route', order_id=order.id) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="return_to" value="order">
+        <button class="secondary-button" type="submit">Revoke all sessions</button>
+      </form>
+      {% if order.status == "active" %}
+        <form method="post" action="{{ url_for('admin.revoke_order_route', order_id=order.id) }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="return_to" value="order">
+          <button class="danger-button" type="submit">Revoke order</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="metric-grid order-metrics" aria-label="Order status">
+    <article><span>Access</span><strong class="metric-status">{{ order.status }}</strong></article>
+    <article><span>Delivery</span><strong class="metric-status">{{ order.delivery_status }}</strong></article>
+    <article><span>Sessions</span><strong>{{ buyer_sessions|length }}</strong></article>
+    <article><span>Known IPs</span><strong>{{ ip_summary|length }}</strong></article>
+  </section>
+
+  <section class="admin-panel">
+    <h2>Purchase and access information</h2>
+    <dl class="detail-list">
+      <div><dt>Internal ID</dt><dd>#{{ order.id }}</dd></div>
+      <div><dt>Order reference</dt><dd>{{ order.g2g_order_id }}</dd></div>
+      <div><dt>Buyer username</dt><dd>{{ order.buyer_username or "Not supplied by G2G" }}</dd></div>
+      <div><dt>Buyer ID</dt><dd>{{ order.buyer_id or "Not supplied" }}</dd></div>
+      <div><dt>Product</dt><dd>{{ order.product_name }}</dd></div>
+      <div><dt>Offer / quantity</dt><dd>{{ order.offer_id }} · {{ order.quantity }}</dd></div>
+      <div><dt>Purchase date</dt><dd>{{ order.purchased_at.isoformat() }}</dd></div>
+      <div><dt>Expiration date</dt><dd>{{ order.expires_at.isoformat() }}</dd></div>
+      <div><dt>Created</dt><dd>{{ order.created_at.isoformat() }}</dd></div>
+      <div><dt>Delivered</dt><dd>{{ order.delivered_at.isoformat() if order.delivered_at else "Not recorded" }}</dd></div>
+      <div><dt>Revoked</dt><dd>{{ order.revoked_at.isoformat() if order.revoked_at else "No" }}</dd></div>
+      <div><dt>Delivery ID</dt><dd>{{ order.g2g_delivery_id or "Not resolved" }}</dd></div>
+      <div><dt>Access key</dt><dd>Hidden; plaintext is only shown at manual creation or sent during fulfillment.</dd></div>
+      {% if order.last_error %}
+        <div><dt>Last error</dt><dd class="error-text">{{ order.last_error }}</dd></div>
+      {% endif %}
+    </dl>
+  </section>
+
+  <section class="admin-panel">
+    <h2>IP addresses that used this key</h2>
+    <p class="panel-note">These are IPs from successful key unlocks that created buyer sessions.</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>IP address</th><th>Sessions</th><th>Active</th><th>First seen</th><th>Last seen</th></tr></thead>
+        <tbody>
+          {% for item in ip_summary %}
+            <tr>
+              <td><strong>{{ item.ip_address }}</strong></td>
+              <td>{{ item.session_count }}</td>
+              <td>{{ item.active_sessions or 0 }}</td>
+              <td>{{ item.first_seen.isoformat() }}</td>
+              <td>{{ item.last_seen.isoformat() }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5">This key has not created a buyer session yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="admin-panel">
+    <h2>Buyer sessions</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Session</th><th>IP / client</th><th>Hints</th><th>Created</th><th>Last seen / expires</th><th>Action</th></tr></thead>
+        <tbody>
+          {% for buyer_session in buyer_sessions %}
+            <tr>
+              <td>#{{ buyer_session.id }}<br><span class="status {{ 'revoked' if buyer_session.revoked_at else 'active' }}">{{ "revoked" if buyer_session.revoked_at else "active" }}</span></td>
+              <td>{{ buyer_session.ip_address }}<br><small title="{{ buyer_session.user_agent }}">{{ buyer_session.user_agent[:120] or "No user agent" }}</small></td>
+              <td>{{ buyer_session.timezone_hint or "—" }}<br><small>{{ buyer_session.language_hint or "—" }}</small></td>
+              <td>{{ buyer_session.created_at.isoformat() }}</td>
+              <td>{{ buyer_session.last_seen_at.isoformat() }}<br><small>Expires {{ buyer_session.expires_at.isoformat() }}</small></td>
+              <td>
+                {% if not buyer_session.revoked_at %}
+                  <form method="post" action="{{ url_for('admin.revoke_session_route', session_id=buyer_session.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="return_to" value="order">
+                    <input type="hidden" name="order_id" value="{{ order.id }}">
+                    <button class="danger-button" type="submit">Revoke</button>
+                  </form>
+                {% else %}
+                  <small>{{ buyer_session.revoke_reason or "revoked" }}</small>
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6">No buyer sessions.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="admin-panel">
+    <h2>Key access attempts</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Result</th><th>IP address</th><th>Client</th><th>Time</th></tr></thead>
+        <tbody>
+          {% for attempt in access_attempts %}
+            <tr>
+              <td><span class="status {{ 'active' if attempt.result == 'success' else 'failed' }}">{{ attempt.result }}</span></td>
+              <td>{{ attempt.ip_address }}</td>
+              <td><small title="{{ attempt.user_agent }}">{{ attempt.user_agent[:140] or "No user agent" }}</small></td>
+              <td>{{ attempt.created_at.isoformat() }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4">No access attempts are associated with this order.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {% if order.offer_id != "MANUAL" %}
+    <section class="admin-panel split-panels">
+      <div>
+        <h2>Delivery attempts</h2>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Attempt</th><th>Status</th><th>HTTP</th><th>Started</th></tr></thead>
+            <tbody>
+              {% for attempt in delivery_attempts %}
+                <tr><td>{{ attempt.attempt_number }}</td><td>{{ attempt.status }}{% if attempt.error %}<br><small>{{ attempt.error }}</small>{% endif %}</td><td>{{ attempt.http_status or "—" }}</td><td>{{ attempt.started_at.isoformat() }}</td></tr>
+              {% else %}
+                <tr><td colspan="4">No delivery attempts.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <h2>Webhook events</h2>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Event</th><th>Type / status</th><th>Received</th></tr></thead>
+            <tbody>
+              {% for event in webhook_events %}
+                <tr><td title="{{ event.event_id }}">{{ event.event_id[:32] }}</td><td>{{ event.event_type }}<br><span class="status {{ event.status }}">{{ event.status }}</span></td><td>{{ event.received_at.isoformat() }}</td></tr>
+              {% else %}
+                <tr><td colspan="3">No webhook events.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

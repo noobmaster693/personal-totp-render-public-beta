@@ -235,14 +235,31 @@ Open `http://127.0.0.1:5000`. Administrator operations are at
 The admin dashboard shows:
 
 - orders and delivery state;
-- buyer IDs and current access state;
+- buyer usernames/IDs, purchase date, expiration date, and current access state;
 - buyer session IP, browser, timezone, and language hints;
 - webhook event status and conflicts;
 - delivery attempts and errors;
 - cancellation/refund tombstones.
 
-It supports order revocation, individual/all-session revocation, forced
-delivery retry, and G2G delivery-status reconciliation.
+Orders are clickable for a full purchase, delivery, key-use, session, and IP
+history. The admin can also create manual access keys that use the same secure
+hashing, expiry, session tracking, and revocation flow as G2G keys. A newly
+created plaintext key is displayed once on the creation result page.
+
+The visitor report records IP address, browser user agent, and timestamp only
+for public `GET /` visits. It does not record health checks, webhooks, admin
+pages, or static assets. Configure it with:
+
+```dotenv
+VISITOR_LOG_ENABLED=true
+VISITOR_LOG_RETENTION_DAYS=90
+```
+
+IP addresses can be personal data. Set an appropriate retention period and
+update your privacy notice or consent flow where required.
+
+The portal supports order revocation, individual/all-session revocation,
+forced delivery retry, and G2G delivery-status reconciliation.
 
 Operational commands:
 

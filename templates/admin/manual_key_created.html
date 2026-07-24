@@ -1,0 +1,30 @@
+{% extends "admin/base.html" %}
+{% block title %}Manual key created{% endblock %}
+{% block content %}
+  <div class="admin-heading">
+    <div>
+      <p class="eyebrow">Manual access</p>
+      <h1>Key created</h1>
+    </div>
+    <div class="admin-actions">
+      <a class="secondary-button button-link" href="{{ url_for('admin.order_detail', order_id=order.id) }}">View order</a>
+      <a class="secondary-button button-link" href="{{ url_for('admin.create_manual_key') }}">Create another</a>
+    </div>
+  </div>
+
+  <section class="admin-form-card key-result-card">
+    <p class="flash success" role="status">The access key is ready. Copy it now and send it to the buyer through a secure channel.</p>
+    <label for="created-access-key">Access key</label>
+    <input id="created-access-key" class="created-key" value="{{ raw_key }}" readonly autocomplete="off" spellcheck="false">
+    <p class="security-note"><strong>This is the only admin screen that displays this plaintext key.</strong> Later order pages show metadata and usage, but not the key itself.</p>
+
+    <dl>
+      <div><dt>Order reference</dt><dd>{{ order.g2g_order_id }}</dd></div>
+      <div><dt>Buyer username</dt><dd>{{ order.buyer_username or "Not supplied" }}</dd></div>
+      <div><dt>Product</dt><dd>{{ order.product_name }}</dd></div>
+      <div><dt>Purchased</dt><dd>{{ order.purchased_at.isoformat() }}</dd></div>
+      <div><dt>Expires</dt><dd>{{ order.expires_at.isoformat() }}</dd></div>
+      <div><dt>Portal</dt><dd><a href="{{ url_for('index') }}">{{ url_for('index', _external=True) }}</a></dd></div>
+    </dl>
+  </section>
+{% endblock %}

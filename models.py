@@ -17,6 +17,7 @@ class Order(db.Model):
     g2g_delivery_id = db.Column(db.String(160), nullable=True, index=True)
     offer_id = db.Column(db.String(160), nullable=False, index=True)
     buyer_id = db.Column(db.String(160), nullable=True)
+    buyer_username = db.Column(db.String(160), nullable=True, index=True)
     quantity = db.Column(db.Integer, nullable=False, default=1)
     product_name = db.Column(db.String(240), nullable=False)
     purchased_at = db.Column(db.DateTime(timezone=True), nullable=False)
@@ -56,6 +57,18 @@ class AccessAttempt(db.Model):
     order_id = db.Column(db.Integer, db.ForeignKey("orders.id"), nullable=True)
     result = db.Column(db.String(64), nullable=False, index=True)
     created_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )
+
+
+class VisitorEvent(db.Model):
+    __tablename__ = "visitor_events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    ip_address = db.Column(db.String(80), nullable=False, index=True)
+    path = db.Column(db.String(240), nullable=False, default="/")
+    user_agent = db.Column(db.Text, nullable=False, default="")
+    visited_at = db.Column(
         db.DateTime(timezone=True), nullable=False, default=utcnow, index=True
     )
 

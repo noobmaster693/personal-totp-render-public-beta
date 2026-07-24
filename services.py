@@ -7,7 +7,7 @@ from flask import current_app
 from sqlalchemy import distinct, func, select
 
 from extensions import db
-from models import AccessAttempt, BuyerSession, Order
+from models import AccessAttempt, BuyerSession, Order, VisitorEvent
 from security import (
     decrypt_text,
     encrypt_text,
@@ -73,6 +73,19 @@ def log_attempt(
             order_id=order.id if order else None,
         )
     )
+
+
+def record_public_visit(*, ip_address: str, user_agent: str, path: str = "/") -> None:
+    if not current_app.config.get("VISITOR_LOG_ENABLED", True):
+        return
+    db.session.add(
+        VisitorEvent(
+            ip_address=(ip_address or "unknown")[:80],
+            path=(path or "/")[:240],
+            user_agent=user_agent[:1000],
+        )
+    )
+    db.session.commit()
 
 
 def is_rate_limited(ip_address: str) -> bool:
@@ -252,6 +265,7 @@ def create_g2g_order(
     delivery_id: str | None,
     offer_id: str,
     buyer_id: str | None,
+    buyer_username: str | None,
     quantity: int,
     purchased_at: datetime,
     source_payload_digest: str,
@@ -277,6 +291,7 @@ def create_g2g_order(
         g2g_delivery_id=delivery_id,
         offer_id=str(offer_id),
         buyer_id=buyer_id,
+        buyer_username=(buyer_username or "").strip()[:160] or None,
         quantity=quantity,
         product_name=str(product["name"]),
         purchased_at=purchased_at,
@@ -300,6 +315,7 @@ def create_or_get_g2g_order(
     delivery_id: str | None,
     offer_id: str,
     buyer_id: str | None,
+    buyer_username: str | None,
     quantity: int,
     purchased_at: datetime,
     source_payload_digest: str = "",
@@ -315,6 +331,7 @@ def create_or_get_g2g_order(
         delivery_id=delivery_id,
         offer_id=offer_id,
         buyer_id=buyer_id,
+        buyer_username=buyer_username,
         quantity=quantity,
         purchased_at=purchased_at,
         source_payload_digest=source_payload_digest,
@@ -329,18 +346,24 @@ def create_manual_order(
     order_id: str,
     product_name: str,
     duration_seconds: int,
+    buyer_username: str | None = None,
+    purchased_at: datetime | None = None,
+    return_existing: bool = True,
 ) -> tuple[Order, str]:
     existing = db.session.scalar(select(Order).where(Order.g2g_order_id == order_id))
     if existing:
+        if not return_existing:
+            raise ValueError("That order reference already exists.")
         return existing, decrypt_text(existing.access_key_ciphertext)
 
-    now = datetime.now(timezone.utc)
+    now = as_utc(purchased_at or datetime.now(timezone.utc))
     raw_key = generate_access_key()
     order = Order(
         g2g_order_id=order_id,
         g2g_delivery_id="MANUAL",
         offer_id="MANUAL",
         buyer_id="MANUAL",
+        buyer_username=(buyer_username or "").strip()[:160] or None,
         quantity=1,
         product_name=product_name,
         purchased_at=now,
@@ -440,5 +463,14 @@ def cleanup_operational_data(*, older_than_days: int = 90) -> dict[str, int]:
         .filter(BuyerSession.expires_at < cutoff)
         .delete(synchronize_session=False)
     )
+    visitor_events = (
+        db.session.query(VisitorEvent)
+        .filter(VisitorEvent.visited_at < cutoff)
+        .delete(synchronize_session=False)
+    )
     db.session.commit()
-    return {"access_attempts": attempts, "buyer_sessions": sessions}
+    return {
+        "access_attempts": attempts,
+        "buyer_sessions": sessions,
+        "visitor_events": visitor_events,
+    }

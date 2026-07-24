@@ -7,14 +7,16 @@
       <h1>Shared-account access</h1>
     </div>
     <div class="admin-actions">
+      <a class="secondary-button button-link" href="{{ url_for('admin.create_manual_key') }}">Create manual key</a>
+      <a class="secondary-button button-link" href="{{ url_for('admin.visitors') }}">View visitor IPs</a>
       <form method="post" action="{{ url_for('admin.retry_due_route') }}">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <button class="secondary-button" type="submit">Retry due deliveries</button>
       </form>
       <form method="post" action="{{ url_for('admin.cleanup_route') }}">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="days" value="90">
-        <button class="secondary-button" type="submit">Clean data older than 90 days</button>
+        <input type="hidden" name="days" value="{{ retention_days }}">
+        <button class="secondary-button" type="submit">Clean data older than {{ retention_days }} days</button>
       </form>
     </div>
   </div>
@@ -24,6 +26,7 @@
     <article><span>Failed deliveries</span><strong>{{ counts.failed_deliveries }}</strong></article>
     <article><span>Active sessions</span><strong>{{ counts.active_sessions }}</strong></article>
     <article><span>Webhook conflicts</span><strong>{{ counts.webhook_conflicts }}</strong></article>
+    <article><span>Unique visitors · 30 days</span><strong>{{ counts.unique_visitors }}</strong></article>
   </section>
 
   <section class="admin-panel">
@@ -36,21 +39,24 @@
         <tbody>
           {% for order in orders %}
             <tr>
-              <td><strong>{{ order.g2g_order_id }}</strong><br><small>#{{ order.id }}</small></td>
-              <td>{{ order.buyer_id or "unknown" }}<br><small>{{ order.offer_id }} · qty {{ order.quantity }}</small></td>
+              <td><a class="table-link" href="{{ url_for('admin.order_detail', order_id=order.id) }}"><strong>{{ order.g2g_order_id }}</strong></a><br><small>#{{ order.id }}</small></td>
+              <td>{{ order.buyer_username or order.buyer_id or "unknown" }}{% if order.buyer_username and order.buyer_id %}<br><small>Buyer ID: {{ order.buyer_id }}</small>{% endif %}<br><small>{{ order.offer_id }} · qty {{ order.quantity }}</small></td>
               <td><span class="status {{ order.status }}">{{ order.status }}</span></td>
               <td><span class="status {{ order.delivery_status }}">{{ order.delivery_status }}</span><br><small>{{ order.delivery_attempts }} attempt(s)</small>{% if order.last_error %}<details><summary>Last error</summary><p>{{ order.last_error }}</p></details>{% endif %}</td>
               <td>{{ order.expires_at.isoformat() }}</td>
               <td>
                 <div class="row-actions">
-                  <form method="post" action="{{ url_for('admin.retry_order_route', order_id=order.id) }}">
-                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit">Retry</button>
-                  </form>
-                  <form method="post" action="{{ url_for('admin.reconcile_order_route', order_id=order.id) }}">
-                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit">Reconcile</button>
-                  </form>
+                  <a class="secondary-button button-link" href="{{ url_for('admin.order_detail', order_id=order.id) }}">View</a>
+                  {% if order.offer_id != "MANUAL" %}
+                    <form method="post" action="{{ url_for('admin.retry_order_route', order_id=order.id) }}">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                      <button type="submit">Retry</button>
+                    </form>
+                    <form method="post" action="{{ url_for('admin.reconcile_order_route', order_id=order.id) }}">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                      <button type="submit">Reconcile</button>
+                    </form>
+                  {% endif %}
                   <form method="post" action="{{ url_for('admin.revoke_order_sessions_route', order_id=order.id) }}">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <button type="submit">Revoke sessions</button>

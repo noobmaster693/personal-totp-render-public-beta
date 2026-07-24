@@ -52,6 +52,7 @@ class MigrationTests(unittest.TestCase):
                 "delivery_attempts",
                 "portal_settings",
                 "admin_audit",
+                "visitor_events",
                 "alembic_version",
             }.issubset(set(inspector.get_table_names()))
         )
@@ -59,7 +60,9 @@ class MigrationTests(unittest.TestCase):
             version = connection.execute(
                 sa.text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-        self.assertEqual(version, "20260724_0001")
+        self.assertEqual(version, "20260724_0002")
+        order_columns = {item["name"] for item in inspector.get_columns("orders")}
+        self.assertIn("buyer_username", order_columns)
         engine.dispose()
 
     def test_legacy_database_upgrade_preserves_orders_and_key_hashes(self):
@@ -129,6 +132,8 @@ class MigrationTests(unittest.TestCase):
         order_columns = {item["name"] for item in inspector.get_columns("orders")}
         self.assertIn("source_payload_digest", order_columns)
         self.assertIn("delivery_attempts", order_columns)
+        self.assertIn("buyer_username", order_columns)
+        self.assertIn("visitor_events", inspector.get_table_names())
         with engine.connect() as connection:
             row = (
                 connection.execute(
