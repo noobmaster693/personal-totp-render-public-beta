@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app import create_app
@@ -289,6 +290,207 @@ class AdminPortalTests(unittest.TestCase):
             b"success",
         ):
             self.assertIn(expected, detail.data)
+
+    def test_admin_can_extend_and_reactivate_an_expired_key(self):
+        with self.app.app_context():
+            order, raw_key = create_manual_order(
+                order_id="RENEW-ORDER-1",
+                product_name="Renewable access",
+                duration_seconds=3600,
+            )
+            order_id = order.id
+
+        buyer = self.app.test_client()
+        self.assertEqual(
+            buyer.post("/unlock", data={"access_key": raw_key}).status_code,
+            302,
+        )
+        with self.app.app_context():
+            order = db.session.get(Order, order_id)
+            order.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+            db.session.commit()
+            old_session = db.session.scalar(
+                db.select(BuyerSession).where(BuyerSession.order_id == order_id)
+            )
+            old_session_id = old_session.id
+            self.assertIsNone(old_session.revoked_at)
+
+        self.login()
+        before_extension = datetime.now(timezone.utc)
+        response = self.client.post(
+            f"/admin/orders/{order_id}/expiration",
+            data={
+                "_csrf_token": self.csrf(),
+                "mode": "extend",
+                "duration_value": "2",
+                "duration_unit": "hours",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Expiration updated", response.data)
+
+        with self.app.app_context():
+            order = db.session.get(Order, order_id)
+            self.assertEqual(order.status, "expired")
+            self.assertGreater(
+                order.expires_at.replace(tzinfo=timezone.utc),
+                before_extension + timedelta(hours=1, minutes=59),
+            )
+            old_session = db.session.get(BuyerSession, old_session_id)
+            self.assertIsNotNone(old_session.revoked_at)
+            self.assertIsNotNone(
+                db.session.scalar(
+                    db.select(AdminAudit).where(
+                        AdminAudit.action == "order_expiration_extended"
+                    )
+                )
+            )
+
+        self.assertEqual(
+            buyer.post("/unlock", data={"access_key": raw_key}).status_code,
+            403,
+        )
+        response = self.client.post(
+            f"/admin/orders/{order_id}/reactivate",
+            data={"_csrf_token": self.csrf()},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Order reactivated", response.data)
+
+        self.assertEqual(
+            buyer.post("/unlock", data={"access_key": raw_key}).status_code,
+            302,
+        )
+        with self.app.app_context():
+            order = db.session.get(Order, order_id)
+            self.assertEqual(order.status, "active")
+            sessions = db.session.scalars(
+                db.select(BuyerSession)
+                .where(BuyerSession.order_id == order_id)
+                .order_by(BuyerSession.id)
+            ).all()
+            self.assertEqual(len(sessions), 2)
+            self.assertIsNotNone(sessions[0].revoked_at)
+            self.assertIsNone(sessions[1].revoked_at)
+            reactivation = db.session.scalar(
+                db.select(AdminAudit).where(AdminAudit.action == "order_reactivated")
+            )
+            self.assertIsNotNone(reactivation)
+
+    def test_reactivation_requires_a_future_expiration(self):
+        with self.app.app_context():
+            order, _ = create_manual_order(
+                order_id="RENEW-ORDER-PAST",
+                product_name="Expired access",
+                duration_seconds=3600,
+            )
+            order_id = order.id
+            order.purchased_at = datetime.now(timezone.utc) - timedelta(days=2)
+            order.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+            order.status = "expired"
+            db.session.commit()
+
+        self.login()
+        response = self.client.post(
+            f"/admin/orders/{order_id}/reactivate",
+            data={"_csrf_token": self.csrf()},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Extend the expiration into the future", response.data)
+        with self.app.app_context():
+            self.assertEqual(db.session.get(Order, order_id).status, "expired")
+            self.assertIsNone(
+                db.session.scalar(
+                    db.select(AdminAudit).where(
+                        AdminAudit.action == "order_reactivated"
+                    )
+                )
+            )
+
+    def test_revoked_order_cannot_be_renewed_or_reactivated(self):
+        with self.app.app_context():
+            order, _ = create_manual_order(
+                order_id="RENEW-ORDER-REVOKED",
+                product_name="Revoked access",
+                duration_seconds=3600,
+            )
+            order_id = order.id
+            original_expiration = order.expires_at
+            order.status = "revoked"
+            order.revoked_at = datetime.now(timezone.utc)
+            db.session.commit()
+
+        self.login()
+        response = self.client.post(
+            f"/admin/orders/{order_id}/expiration",
+            data={
+                "_csrf_token": self.csrf(),
+                "mode": "extend",
+                "duration_value": "1",
+                "duration_unit": "days",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"cannot be renewed", response.data)
+        response = self.client.post(
+            f"/admin/orders/{order_id}/reactivate",
+            data={"_csrf_token": self.csrf()},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Only expired orders can be reactivated", response.data)
+
+        with self.app.app_context():
+            order = db.session.get(Order, order_id)
+            self.assertEqual(order.status, "revoked")
+            self.assertEqual(order.expires_at, original_expiration)
+
+    def test_setting_expiration_to_the_past_expires_order_and_sessions(self):
+        with self.app.app_context():
+            order, raw_key = create_manual_order(
+                order_id="RENEW-ORDER-SET",
+                product_name="Exact expiration",
+                duration_seconds=3600,
+            )
+            order_id = order.id
+            order.purchased_at = datetime.now(timezone.utc) - timedelta(days=2)
+            db.session.commit()
+
+        buyer = self.app.test_client()
+        self.assertEqual(
+            buyer.post("/unlock", data={"access_key": raw_key}).status_code,
+            302,
+        )
+        past_expiration = datetime.now(timezone.utc) - timedelta(hours=1)
+        self.login()
+        response = self.client.post(
+            f"/admin/orders/{order_id}/expiration",
+            data={
+                "_csrf_token": self.csrf(),
+                "mode": "set",
+                "expires_at": past_expiration.strftime("%Y-%m-%dT%H:%M"),
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            order = db.session.get(Order, order_id)
+            buyer_session = db.session.scalar(
+                db.select(BuyerSession).where(BuyerSession.order_id == order_id)
+            )
+            self.assertEqual(order.status, "expired")
+            self.assertIsNotNone(buyer_session.revoked_at)
+            self.assertIsNotNone(
+                db.session.scalar(
+                    db.select(AdminAudit).where(
+                        AdminAudit.action == "order_expiration_set"
+                    )
+                )
+            )
 
     def test_public_visitor_report_only_logs_public_get_requests(self):
         visitor = self.app.test_client()

@@ -19,6 +19,7 @@ never returned to buyers.
 - G2G delivery lookup, retries, and HTTP 409 status reconciliation;
 - server-side, individually revocable buyer sessions;
 - automatic order and session expiration;
+- a buyer-selected, browser-detected interface in 20 languages;
 - `/admin` operations and encrypted account-settings portal;
 - administrator password plus separate optional/production-required TOTP;
 - admin audit records;
@@ -238,6 +239,18 @@ python app.py
 Open `http://127.0.0.1:5000`. Administrator operations are at
 `http://127.0.0.1:5000/admin`.
 
+## Buyer languages
+
+The buyer portal detects the browser's preferred supported language on the
+first visit and always provides a visible language selector. A buyer's choice
+is stored in their browser session and continues across key unlocks.
+
+The complete interface is available in English, French, Spanish, German,
+Italian, Portuguese, Dutch, Polish, Turkish, Russian, Ukrainian, Arabic,
+Hindi, Simplified Chinese, Traditional Chinese, Japanese, Korean, Indonesian,
+Vietnamese, and Thai. Arabic automatically uses a right-to-left layout.
+Unsupported browser languages fall back to English.
+
 ## Administration and operations
 
 The admin dashboard shows:
@@ -255,6 +268,13 @@ hashing, expiry, session tracking, and revocation flow as G2G keys. A newly
 created plaintext key is displayed on the creation result page. An
 authenticated administrator can explicitly reveal a stored key from its order
 page; every reveal is CSRF-protected and recorded in the admin audit log.
+
+The order page can set an exact UTC expiration or extend access by hours or
+days. An expired order remains inactive after its date is extended until the
+administrator explicitly reactivates it. Reactivation preserves the same buyer
+key but never restores previously revoked sessions. Cancelled, refunded, or
+manually revoked orders cannot be renewed through these controls. Every
+expiration change and reactivation is recorded in the admin audit log.
 
 The visitor report records IP address, browser user agent, and timestamp only
 for public `GET /` visits. It does not record health checks, webhooks, admin
@@ -309,7 +329,8 @@ python -m unittest tests.test_postgres -v
 The suite covers current G2G fixtures, documented signature headers,
 idempotency, event/order conflicts, cancellation-before-order, delivery retry,
 HTTP 409 reconciliation, fresh/legacy migrations, admin controls, session
-revocation, and production configuration enforcement.
+revocation, expiration changes, reactivation, language selection and
+localization completeness, and production configuration enforcement.
 
 ## Shared-account limitation
 
